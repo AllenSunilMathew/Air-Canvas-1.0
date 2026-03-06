@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Air Sketch</title>
+
+<style>
+:root{
+  --bg:#f4f7ff;
+  --accent:#6c8cff;
+  --accent2:#8fd3f4;
+}
+
+body{
+  margin:0;
+  font-family:"Segoe UI",sans-serif;
+  background:linear-gradient(135deg,var(--bg),#eef2ff);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  height:100vh;
+}
+
+.title{
+  font-size:32px;
+  font-weight:800;
+  background:linear-gradient(135deg,#6c8cff,#8fd3f4);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  margin-bottom:20px;
+}
+
+.workspace{
+  position:relative;
+  width:700px;
+  height:500px;
+  background:white;
+  border-radius:20px;
+  box-shadow:0 20px 60px rgba(0,0,0,.15);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+canvas{
+  background:white;
+  border-radius:20px;
+}
+
+.videoBox{
+  position:absolute;
+  width:180px;
+  height:135px;
+  top:20px;
+  right:20px;
+  border-radius:12px;
+  overflow:hidden;
+  border:2px solid #ddd;
+  cursor:grab;
+  box-shadow:0 10px 25px rgba(0,0,0,.2);
+}
+
+video{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+}
+
+.controls{
+  margin-top:20px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:12px;
+}
+
+.buttons{
+  display:flex;
+  gap:10px;
+}
+
+button{
+  padding:12px 20px;
+  border:none;
+  border-radius:16px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:white;
+  font-weight:600;
+  cursor:pointer;
+  box-shadow:0 6px 20px rgba(108,140,255,.3);
+}
+
+button:hover{
+  transform:scale(1.05);
+}
+
+.colors{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
+
+.colors div{
+  width:28px;
+  height:28px;
+  border-radius:50%;
+  cursor:pointer;
+  border:2px solid #ddd;
+}
+
+.color-picker{
+  width:40px;
+  height:28px;
+  border:none;
+}
+</style>
+</head>
+
+<body>
+
+<div class="title">Air Canvas 1.0</div>
+
+<div class="workspace">
+
+<canvas id="canvas" width="700" height="500"></canvas>
+
+<div class="videoBox" id="videoBox">
+<video id="video" autoplay></video>
+</div>
+
+</div>
+
+<div class="controls">
+
+<div class="colors">
+<div style="background:black" onclick="setColor('black')"></div>
+<div style="background:red" onclick="setColor('red')"></div>
+<div style="background:blue" onclick="setColor('blue')"></div>
+<div style="background:green" onclick="setColor('green')"></div>
+<div style="background:orange" onclick="setColor('orange')"></div>
+<input type="color" class="color-picker" onchange="setColor(this.value)">
+</div>
+
+<div class="buttons">
+<button onclick="clearCanvas()">Clear</button>
+<button onclick="generate()">Generate Image</button>
+</div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+
+const video = document.getElementById("video")
+const canvas = document.getElementById("canvas")
+const ctx = canvas.getContext("2d")
+
+let prevX=null
+let prevY=null
+let drawColor="black"
+
+function setColor(c){
+ drawColor=c
+}
+
+function distance(a,b){
+ return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2)
+}
+
+function clearCanvas(){
+ ctx.clearRect(0,0,canvas.width,canvas.height)
+}
+
+function generate(){
+
+ const dataURL=canvas.toDataURL("image/png")
+
+ fetch("/generate",{
+ method:"POST",
+ body:JSON.stringify({image:dataURL}),
+ headers:{
+ "Content-Type":"application/json"
+ }
+ }).then(res=>res.json())
+ .then(data=>{
+ window.location.href="/result.html"
+ })
+}
+
+const hands=new Hands({
+ locateFile:(file)=>{
+ return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+ }
+})
+
+hands.setOptions({
+ maxNumHands:1,
+ modelComplexity:1,
+ minDetectionConfidence:0.7,
+ minTrackingConfidence:0.7
+})
+
+hands.onResults(results=>{
+
+ if(results.multiHandLandmarks){
+
+ const landmarks=results.multiHandLandmarks[0]
+
+ const indexTip=landmarks[8]
+ const thumbTip=landmarks[4]
+
+ let x=indexTip.x*canvas.width
+ let y=indexTip.y*canvas.height
+
+ if(distance(indexTip,thumbTip)<0.05){
+
+ if(prevX!=null){
+
+ ctx.beginPath()
+ ctx.moveTo(prevX,prevY)
+ ctx.lineTo(x,y)
+ ctx.strokeStyle=drawColor
+ ctx.lineWidth=5
+ ctx.stroke()
+
+ }
+
+ prevX=x
+ prevY=y
+
+ }else{
+
+ prevX=null
+ prevY=null
+
+ }
+
+ }
+
+})
+
+const camera=new Camera(video,{
+ onFrame:async()=>{
+ await hands.send({image:video})
+ },
+ width:640,
+ height:480
+})
+
+camera.start()
+
+const box=document.getElementById("videoBox")
+
+let isDragging=false
+let offsetX,offsetY
+
+box.addEventListener("mousedown",(e)=>{
+ isDragging=true
+ offsetX=e.clientX-box.offsetLeft
+ offsetY=e.clientY-box.offsetTop
+})
+
+document.addEventListener("mousemove",(e)=>{
+ if(isDragging){
+ box.style.left=(e.clientX-offsetX)+"px"
+ box.style.top=(e.clientY-offsetY)+"px"
+ }
+})
+
+document.addEventListener("mouseup",()=>{
+ isDragging=false
+})
+
+</script>
+
+</body>
+</html>
