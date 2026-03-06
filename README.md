@@ -158,6 +158,3 @@ python run.py
 venv\Scripts\activate
 cd backend
 uvicorn main:app --reload
-# Air-Canvas-1.0
-# Air-Canvas-1.0
-# Air-Canvas-1.0
