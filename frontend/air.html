@@ -28,7 +28,7 @@ body{
   background:linear-gradient(135deg,#6c8cff,#8fd3f4);
   -webkit-background-clip:text;
   -webkit-text-fill-color:transparent;
-  margin-bottom:20px;
+  margin-bottom:10px;
 }
 
 .workspace{
@@ -120,20 +120,14 @@ button:hover{
   border:none;
 }
 
-.style-select{
-  display:flex;
-  gap:10px;
-  align-items:center;
-}
-
-.style-select select{
-  padding:10px 16px;
-  border:none;
+.instructions{
+  margin-top:15px;
+  font-size:12px;
+  color:#666;
+  text-align:center;
+  background:white;
+  padding:10px 20px;
   border-radius:12px;
-  background:#eef2ff;
-  font-weight:600;
-  cursor:pointer;
-  font-size:14px;
 }
 </style>
 </head>
@@ -168,14 +162,10 @@ button:hover{
 <button onclick="clearCanvas()">Clear</button>
 </div>
 
-<div class="style-select">
-<select id="styleSelect" title="Select art style">
-<option value="outline">Outline</option>
-<option value="realistic" selected>Realistic</option>
-<option value="animated">Animated</option>
-</select>
 </div>
 
+<div class="instructions">
+🖐 Show open palm to start drawing | ✌️ 2 fingers = Clear canvas
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
@@ -193,26 +183,29 @@ const videoCtx = videoCanvas.getContext("2d")
 let prevX = null
 let prevY = null
 let drawColor = "black"
+let isGenerating = false
 
-// State: 0 = waiting for open palm, 1 = palm detected, 2 = drawing
+// State: 0 = waiting, 1 = palm detected, 2 = drawing, 3 = clear gesture
 let handState = 0
 let palmDetectedTime = 0
+let lastFingerCount = 0
 
 function setColor(c){
  drawColor = c
-}
-
-function distance(a, b){
- return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
 }
 
 function clearCanvas(){
  ctx.clearRect(0, 0, canvas.width, canvas.height)
  localStorage.removeItem("sketch");
  localStorage.setItem("status", "idle");
+ isGenerating = false;
 }
 
 async function generate(){
+ // Prevent multiple generations - only generate once until canvas is cleared
+ if (isGenerating) return;
+ isGenerating = true;
+ 
  const exportCanvas=document.createElement("canvas");
  exportCanvas.width=canvas.width;
  exportCanvas.height=canvas.height;
@@ -224,14 +217,18 @@ async function generate(){
  const blob=await new Promise(r=>exportCanvas.toBlob(r,"image/png"));
  const reader=new FileReader();
 
- reader.onloadend=()=>{
+ reader.onloadend=function(){
    localStorage.setItem("sketch",reader.result);
-   localStorage.setItem("style",styleSelect.value);
-   localStorage.setItem("status","idle"); // Reset first
-   localStorage.setItem("status","generating"); // Then generate to always trigger
+   localStorage.setItem("style","outline");
+   localStorage.setItem("status","idle");
+   localStorage.setItem("status","generating");
+   
+   // Clear the canvas after triggering generation
+   ctx.clearRect(0, 0, canvas.width, canvas.height);
  };
  reader.readAsDataURL(blob);
 }
+
 // Initialize MediaPipe Hands
 const hands = new Hands({
  locateFile: (file) => {
@@ -256,30 +253,57 @@ hands.onResults((results) => {
  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
    const landmarks = results.multiHandLandmarks[0]
    
-   // Get key landmarks
+   // Get key landmarks for fingertips
    const idxTip = landmarks[8]
-   const thTip = landmarks[4]
    const midTip = landmarks[12]
    const rngTip = landmarks[16]
    const pkyTip = landmarks[20]
    
-   // Draw hand landmarks on video canvas
+   // Get PIP joints (middle joints)
+   const idxPip = landmarks[6]
+   const midPip = landmarks[10]
+   const rngPip = landmarks[14]
+   const pkyPip = landmarks[18]
+   
+   // Get MCP joints (base joints)
+   const idxMcp = landmarks[5]
+   const midMcp = landmarks[9]
+   const rngMcp = landmarks[13]
+   const pkyMcp = landmarks[17]
+   
+   // Check finger extension
+   const indexExtended = idxTip.y < idxPip.y && idxPip.y < idxMcp.y
+   const midExtended = midTip.y < midPip.y && midPip.y < midMcp.y
+   const rngExtended = rngTip.y < rngPip.y && rngPip.y < rngMcp.y
+   const pkyExtended = pkyTip.y < pkyPip.y && pkyPip.y < pkyMcp.y
+   
+   // Count extended fingers (excluding thumb)
+   let extendedFingers = 0;
+   if (indexExtended) extendedFingers++;
+   if (midExtended) extendedFingers++;
+   if (rngExtended) extendedFingers++;
+   if (pkyExtended) extendedFingers++;
+   
+   // Check for 2 fingers gesture to clear (index + middle only)
+   const isTwoFingers = indexExtended && midExtended && !rngExtended && !pkyExtended;
+   
+   // Handle 2-finger clear gesture (only when not drawing)
+   if (handState === 0 && isTwoFingers) {
+     if (Date.now() - palmDetectedTime > 500) {
+       clearCanvas();
+       palmDetectedTime = Date.now();
+     }
+   }
+   
+   // Draw hand landmarks
    drawHandLandmarks(landmarks)
    
-   // Convert to drawing canvas coordinates (flip X for mirror effect)
+   // Check if open palm (all 4 fingers)
+   const isOpenPalm = indexExtended && midExtended && rngExtended && pkyExtended
+   
+   // Convert to drawing canvas coordinates
    let x = (1 - idxTip.x) * canvas.width
    let y = idxTip.y * canvas.height
-   
-   // Check if index finger is extended (straight up)
-   const indexPip = landmarks[6]  // pip joint
-   const indexMcp = landmarks[5]  // mcp joint
-   const indexExtended = idxTip.y < indexPip.y && indexPip.y < indexMcp.y
-   
-   // Check if all fingers (except thumb) are extended - open palm
-   const midExtended = midTip.y < landmarks[11].y && landmarks[11].y < landmarks[10].y
-   const rngExtended = rngTip.y < landmarks[15].y && landmarks[15].y < landmarks[14].y
-   const pkyExtended = pkyTip.y < landmarks[19].y && landmarks[19].y < landmarks[18].y
-   const isOpenPalm = midExtended && rngExtended && pkyExtended && indexExtended
    
    // State machine:
    // State 0: Waiting for open palm
@@ -287,48 +311,38 @@ hands.onResults((results) => {
    // State 2: Drawing (index finger up)
    
    if (isOpenPalm && handState === 0) {
-     // Transition to state 1 - open palm detected
      handState = 1
      palmDetectedTime = Date.now()
    } else if (handState === 1) {
-     // Check if open palm is still present
      if (isOpenPalm) {
-       // Check if enough time passed (500ms) to confirm
        if (Date.now() - palmDetectedTime > 500) {
-         handState = 2 // Ready to draw
+         handState = 2
        }
      } else {
-       // Check if index finger is up alone (drawing position)
        if (indexExtended && !midExtended && !rngExtended && !pkyExtended) {
-         handState = 2 // Start drawing
+         handState = 2
        } else {
-         // Reset if not in drawing position
          handState = 0
        }
      }
    } else if (handState === 2) {
-     // Drawing mode - check if we should stop or auto-generate
-     // If open palm is detected while drawing, auto-generate the image
      if (isOpenPalm) {
-       // Check if enough time passed (500ms) to confirm it's intentional
-       if (Date.now() - palmDetectedTime > 500) {
-         // Auto-generate image
+       if (Date.now() - palmDetectedTime > 200) {
          generate();
-         handState = 0; // Reset to waiting
+         handState = 0;
          prevX = null;
          prevY = null;
        }
        palmDetectedTime = Date.now();
      } 
-     // If all fingers are closed (not extended), stop drawing
      else if (!indexExtended && !midExtended && !rngExtended && !pkyExtended) {
-       handState = 0 // Reset to waiting
+       handState = 0
        prevX = null
        prevY = null
      }
    }
    
-   // Drawing logic - only draw when in state 2 and index is extended
+   // Drawing logic
    if (handState === 2 && indexExtended) {
      if (prevX !== null) {
        ctx.beginPath()
@@ -336,8 +350,8 @@ hands.onResults((results) => {
        ctx.lineTo(x, y)
        ctx.strokeStyle = drawColor
        ctx.lineWidth = 5
-       ctx.lineCap = 'round'
-       ctx.lineJoin = 'round'
+       ctx.lineCap = "round"
+       ctx.lineJoin = "round"
        ctx.stroke()
      }
      prevX = x
@@ -350,16 +364,15 @@ hands.onResults((results) => {
 })
 
 function drawHandLandmarks(landmarks) {
- // Draw connections (skeleton)
  const connections = [
    [0,1],[1,2],[2,3],[3,7],[0,5],[5,6],[6,7],[0,9],[9,10],[10,11],
    [0,13],[13,14],[14,15],[0,17],[17,18],[18,19],[5,8],[9,12],[13,16],[17,20],[1,4]
  ]
  
- videoCtx.strokeStyle = 'rgba(108, 140, 255, 0.8)'
+ videoCtx.strokeStyle = "rgba(108, 140, 255, 0.8)"
  videoCtx.lineWidth = 2
  
- connections.forEach(([start, end]) => {
+ connections.forEach(function([start, end]) {
    const p1 = landmarks[start]
    const p2 = landmarks[end]
    videoCtx.beginPath()
@@ -368,34 +381,30 @@ function drawHandLandmarks(landmarks) {
    videoCtx.stroke()
  })
  
- // Draw landmark points
- landmarks.forEach((lm, i) => {
+ landmarks.forEach(function(lm, i) {
    const x = lm.x * videoCanvas.width
    const y = lm.y * videoCanvas.height
    
    videoCtx.beginPath()
    videoCtx.arc(x, y, 4, 0, Math.PI * 2)
    
-   // Index finger tip is red, others are blue
    if (i === 8) {
-     videoCtx.fillStyle = '#ff0000'
+     videoCtx.fillStyle = "#ff0000"
    } else if (i === 4) {
-     videoCtx.fillStyle = '#00ff00'  // Thumb
+     videoCtx.fillStyle = "#00ff00"
    } else {
-     videoCtx.fillStyle = '#6c8cff'
+     videoCtx.fillStyle = "#6c8cff"
    }
    videoCtx.fill()
  })
  
- // Draw index finger tip highlight (drawing point)
  const idx = landmarks[8]
  const idxX = idx.x * videoCanvas.width
  const idxY = idx.y * videoCanvas.height
  
- // Glow effect
  const gradient = videoCtx.createRadialGradient(idxX, idxY, 0, idxX, idxY, 20)
- gradient.addColorStop(0, 'rgba(255, 0, 0, 0.5)')
- gradient.addColorStop(1, 'rgba(255, 0, 0, 0)')
+ gradient.addColorStop(0, "rgba(255, 0, 0, 0.5)")
+ gradient.addColorStop(1, "rgba(255, 0, 0, 0)")
  videoCtx.beginPath()
  videoCtx.arc(idxX, idxY, 20, 0, Math.PI * 2)
  videoCtx.fillStyle = gradient
@@ -404,16 +413,16 @@ function drawHandLandmarks(landmarks) {
 
 // Initialize camera
 const camera = new Camera(video, {
- onFrame: async () => {
+ onFrame: async function() {
    await hands.send({image: video})
  },
  width: 640,
  height: 480
 })
 
-camera.start().then(() => {
+camera.start().then(function(){
  console.log("Camera started")
-}).catch(err => {
+}).catch(function(err){
  console.error("Camera error:", err)
 })
 
@@ -422,20 +431,20 @@ const box = document.getElementById("videoBox")
 let isDragging = false
 let offsetX, offsetY
 
-box.addEventListener("mousedown", (e) => {
+box.addEventListener("mousedown", function(e){
  isDragging = true
  offsetX = e.clientX - box.offsetLeft
  offsetY = e.clientY - box.offsetTop
 })
 
-document.addEventListener("mousemove", (e) => {
+document.addEventListener("mousemove", function(e){
  if (isDragging) {
    box.style.left = (e.clientX - offsetX) + "px"
    box.style.top = (e.clientY - offsetY) + "px"
  }
 })
 
-document.addEventListener("mouseup", () => {
+document.addEventListener("mouseup", function(){
  isDragging = false
 })
 
