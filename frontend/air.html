@@ -166,11 +166,10 @@ button:hover{
 
 <div class="buttons">
 <button onclick="clearCanvas()">Clear</button>
-<button onclick="generate()">Generate Image</button>
 </div>
 
 <div class="style-select">
-<select id="styleSelect">
+<select id="styleSelect" title="Select art style">
 <option value="outline">Outline</option>
 <option value="realistic" selected>Realistic</option>
 <option value="animated">Animated</option>
@@ -233,7 +232,6 @@ async function generate(){
  };
  reader.readAsDataURL(blob);
 }
-
 // Initialize MediaPipe Hands
 const hands = new Hands({
  locateFile: (file) => {
@@ -284,35 +282,54 @@ hands.onResults((results) => {
    const isOpenPalm = midExtended && rngExtended && pkyExtended && indexExtended
    
    // State machine:
-   // State 0: Waiting for open palm (idle)
-   // State 1: Drawing mode active (index finger will draw)
-   // State 2: Generating (open palm triggers generation)
+   // State 0: Waiting for open palm
+   // State 1: Open palm detected, waiting for index finger up
+   // State 2: Drawing (index finger up)
    
    if (isOpenPalm && handState === 0) {
-     // Transition to drawing mode
+     // Transition to state 1 - open palm detected
      handState = 1
      palmDetectedTime = Date.now()
-   } else if (handState === 1 && isOpenPalm) {
-     // Open palm while in drawing mode = trigger generate
-     if (Date.now() - palmDetectedTime > 800) {
-       // Trigger generate after holding open palm for 800ms
-       handState = 2
-       generate()
-     }
    } else if (handState === 1) {
-     // Drawing mode - index finger extended = draw
-     if (indexExtended) {
-       // Drawing with index finger
+     // Check if open palm is still present
+     if (isOpenPalm) {
+       // Check if enough time passed (500ms) to confirm
+       if (Date.now() - palmDetectedTime > 500) {
+         handState = 2 // Ready to draw
+       }
      } else {
-       // Index finger not extended, don't draw
+       // Check if index finger is up alone (drawing position)
+       if (indexExtended && !midExtended && !rngExtended && !pkyExtended) {
+         handState = 2 // Start drawing
+       } else {
+         // Reset if not in drawing position
+         handState = 0
+       }
      }
    } else if (handState === 2) {
-     // Generating - do nothing
-     return
+     // Drawing mode - check if we should stop or auto-generate
+     // If open palm is detected while drawing, auto-generate the image
+     if (isOpenPalm) {
+       // Check if enough time passed (500ms) to confirm it's intentional
+       if (Date.now() - palmDetectedTime > 500) {
+         // Auto-generate image
+         generate();
+         handState = 0; // Reset to waiting
+         prevX = null;
+         prevY = null;
+       }
+       palmDetectedTime = Date.now();
+     } 
+     // If all fingers are closed (not extended), stop drawing
+     else if (!indexExtended && !midExtended && !rngExtended && !pkyExtended) {
+       handState = 0 // Reset to waiting
+       prevX = null
+       prevY = null
+     }
    }
    
-   // Drawing logic - only draw when in state 1 and index is extended
-   if (handState === 1 && indexExtended) {
+   // Drawing logic - only draw when in state 2 and index is extended
+   if (handState === 2 && indexExtended) {
      if (prevX !== null) {
        ctx.beginPath()
        ctx.moveTo(prevX, prevY)
