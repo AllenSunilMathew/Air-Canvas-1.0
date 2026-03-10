@@ -239,6 +239,21 @@ button:hover{
 </select>
 </div>
 
+<div class="colors" style="margin-top: 10px;">
+  <div style="background:black" onclick="setColor('black')"></div>
+  <div style="background:red" onclick="setColor('red')"></div>
+  <div style="background:blue" onclick="setColor('blue')"></div>
+  <div style="background:green" onclick="setColor('green')"></div>
+  <input type="color" id="colorPicker" class="color-picker" value="#000000" onchange="setColor(this.value)">
+</div>
+
+<div class="style-select" style="margin-top: 10px;">
+  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+    <input type="checkbox" id="straightenToggle" checked style="width: 18px; height: 18px; cursor: pointer;">
+    <span style="font-weight: 600; color: #333;">Line Straightening</span>
+  </label>
+</div>
+
 <div class="instructions">
 🖐 Show open palm to start drawing | ✌️ 2 fingers = Clear canvas | 🤟 3 fingers = Go to Draw Page
 </div>
@@ -246,7 +261,109 @@ button:hover{
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
+<!-- Google Ink Stroke Modeler for line straightening -->
+<script src="https://unpkg.com/@google/modelviewer@1.12.0/lib/model-viewer.js"></script>
+
 <script>
+// ============================================
+// Line Straightening Module - Straightens AFTER stroke completion
+// ============================================
+
+// Store all strokes drawn on the canvas
+let allStrokes = []; // Array of {points: [{x,y}], color: string}
+let currentStrokePoints = [];
+let currentStrokeColor = "black";
+
+class InkStrokeModeler {
+  constructor() {
+    this.lineThreshold = 0.7; // Threshold for line detection
+  }
+
+  /**
+   * Analyze if the stroke resembles a line and return straightened points
+   */
+  straightenStroke(points) {
+    if (!points || points.length < 3) {
+      return points; // Not enough points to analyze
+    }
+
+    // Get first and last points
+    const start = points[0];
+    const end = points[points.length - 1];
+
+    // Calculate line direction
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lineLength = Math.sqrt(dx * dx + dy * dy);
+
+    if (lineLength < 20) {
+      return points; // Too short to be a line
+    }
+
+    // Normalize direction
+    const dirX = dx / lineLength;
+    const dirY = dy / lineLength;
+
+    // Calculate how well each point fits the line
+    let totalFit = 0;
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i];
+
+      // Vector from start to point
+      const px = p.x - start.x;
+      const py = p.y - start.y;
+
+      // Project onto line direction
+      const projection = px * dirX + py * dirY;
+
+      // Perpendicular distance
+      const perpX = px - projection * dirX;
+      const perpY = py - projection * dirY;
+      const perpDist = Math.sqrt(perpX * perpX + perpY * perpY);
+
+      // Normalize by stroke length
+      const fit = Math.max(0, 1 - (perpDist / lineLength));
+      totalFit += fit;
+    }
+
+    const avgFit = totalFit / (points.length - 2);
+
+    // If it looks like a line, straighten it
+    if (avgFit > this.lineThreshold) {
+      const straightenedPoints = [];
+      
+      // Add start point
+      straightenedPoints.push({ x: start.x, y: start.y });
+
+      // Calculate intermediate points
+      for (let i = 1; i < points.length - 1; i++) {
+        const p = points[i];
+        const px = p.x - start.x;
+        const py = p.y - start.y;
+        
+        // Project onto line
+        const projection = px * dirX + py * dirY;
+        
+        straightenedPoints.push({
+          x: start.x + projection * dirX,
+          y: start.y + projection * dirY
+        });
+      }
+
+      // Add end point
+      straightenedPoints.push({ x: end.x, y: end.y });
+
+      return straightenedPoints;
+    }
+
+    return points; // Return original if not detected as line
+  }
+}
+
+// Create global instance
+const inkModeler = new InkStrokeModeler();
+
 const video = document.getElementById("video")
 const canvas = document.getElementById("canvas")
 const ctx = canvas.getContext("2d")
@@ -260,6 +377,9 @@ let prevX = null
 let prevY = null
 let drawColor = "black"
 
+// Line straightening enabled by default
+let lineStraighteningEnabled = true;
+
 let handState = 0
 let palmDetectedTime = 0
 
@@ -269,8 +389,56 @@ function setColor(c){
 
 function clearCanvas(){
  ctx.clearRect(0, 0, canvas.width, canvas.height)
+ allStrokes = [];
+ currentStrokePoints = [];
  localStorage.removeItem("sketch");
  localStorage.setItem("status", "idle");
+}
+
+// Process and straighten the completed stroke
+function processCompletedStroke() {
+  if (!lineStraighteningEnabled || currentStrokePoints.length < 3) {
+    // Just save the stroke as-is
+    if (currentStrokePoints.length > 0) {
+      allStrokes.push({
+        points: [...currentStrokePoints],
+        color: currentStrokeColor
+      });
+    }
+    currentStrokePoints = [];
+    return;
+  }
+
+  // Analyze and straighten
+  const straightenedPoints = inkModeler.straightenStroke(currentStrokePoints);
+  
+  // Save the straightened stroke
+  allStrokes.push({
+    points: straightenedPoints,
+    color: currentStrokeColor
+  });
+
+  // Clear and redraw everything with the straightened stroke
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  allStrokes.forEach(stroke => {
+    if (stroke.points.length < 2) return;
+    
+    ctx.beginPath();
+    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+    
+    for (let i = 1; i < stroke.points.length; i++) {
+      ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+    }
+    
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  });
+
+  currentStrokePoints = [];
 }
 
 async function generate(){
@@ -308,6 +476,7 @@ hands.setOptions({
 })
 
 let isFirstFrame = true;
+let wasDrawing = false;
 
 hands.onResults(function(results) {
  if (isFirstFrame) {
@@ -396,8 +565,19 @@ hands.onResults(function(results) {
      }
    }
    
-   if (handState === 2 && indexExtended) {
+   // Check if drawing state changed
+   const isDrawing = (handState === 2 && indexExtended);
+   
+   // If just stopped drawing, process the completed stroke
+   if (wasDrawing && !isDrawing) {
+     // Stroke completed - process it!
+     processCompletedStroke();
+   }
+   wasDrawing = isDrawing;
+   
+   if (isDrawing) {
      if (prevX !== null) {
+       // Draw normally while drawing
        ctx.beginPath()
        ctx.moveTo(prevX, prevY)
        ctx.lineTo(x, y)
@@ -406,9 +586,20 @@ hands.onResults(function(results) {
        ctx.lineCap = "round"
        ctx.lineJoin = "round"
        ctx.stroke()
+       
+       // Store point for later processing
+       currentStrokePoints.push({x: x, y: y});
+       currentStrokeColor = drawColor;
+       
+       prevX = x
+       prevY = y
+     } else {
+       // First point of stroke
+       currentStrokePoints = [{x: x, y: y}];
+       currentStrokeColor = drawColor;
+       prevX = x
+       prevY = y
      }
-     prevX = x
-     prevY = y
    } else {
      prevX = null
      prevY = null
@@ -501,6 +692,14 @@ document.addEventListener("mousemove", function(e){
 document.addEventListener("mouseup", function(){
  isDragging = false
 })
+
+// Line straightening toggle
+document.getElementById('straightenToggle').addEventListener('change', function(e) {
+  lineStraighteningEnabled = e.target.checked;
+  // Reset the modeler when toggling
+  inkModeler.reset();
+  console.log('Line straightening:', lineStraighteningEnabled ? 'enabled' : 'disabled');
+});
 
 </script>
 
