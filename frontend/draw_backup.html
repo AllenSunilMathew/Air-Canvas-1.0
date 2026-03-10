@@ -26,7 +26,7 @@
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  transition: opacity 5s ease, visibility 3s ease;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
 }
 
 .preloader.hidden {
@@ -48,15 +48,11 @@
   animation: spin 1s linear infinite;
   margin: 0 auto 20px;
 }
+
 @keyframes spin {
   0% { transform: rotate(0deg); }
-  20% { transform: rotate(72deg); }
-  40% { transform: rotate(144deg); }
-  60% { transform: rotate(216deg); }
-  80% { transform: rotate(288deg); }
   100% { transform: rotate(360deg); }
 }
-
 
 .preloader-text {
   font-size: 18px;
@@ -193,31 +189,10 @@ button.active{
 .generate:hover{
   transform:scale(1.05);
 }
-
-
-
 </style>
 </head>
 
 <body>
-
-<!-- Preloader -->
-<div class="preloader" id="preloader">
-  <div class="preloader-content">
-    <div class="spinner"></div>
-    <div class="preloader-text">Welcome To Air Drawing World</div>
-      <p class="text-slate-400 text-sm md:text-base">
-      Preparing your creative canvas...
-    </p>
-
-    <!-- Loading bar -->
-    <div class="w-64 h-1 bg-slate-700 rounded-full overflow-hidden mx-auto">
-      <div class="h-full bg-gradient-to-r from-blue-400 to-cyan-400 animate-loading"></div>
-    </div>
-    <div class="preloader-sub"></div>
-  </div>
-</div>
-
 <div class="app">
 
 <div class="left">
@@ -253,7 +228,7 @@ button.active{
   </div>
 
   <div class="section-title">Style</div>
-  <select id="styleSelect" title="Select output style">
+  <select id="styleSelect">
     <option value="outline">Outline</option>
     <option value="realistic" selected>Realistic</option>
     <option value="animated">Animated</option>
@@ -266,14 +241,6 @@ button.active{
 </div>
 
 <script>
-// Get preloader element
-const preloader = document.getElementById('preloader');
-
-// Hide preloader when page loads
-window.addEventListener('load', function() {
-  preloader.classList.add('hidden');
-});
-
 const canvas=document.getElementById("canvas");
 const ctx=canvas.getContext("2d");
 let drawing=false,lastX=0,lastY=0,mode="brush";
@@ -306,7 +273,7 @@ eraserBtn.onclick=()=>{mode="eraser";eraserBtn.classList.add("active");brushBtn.
 function clearCanvas(){
  ctx.clearRect(0,0,canvas.width,canvas.height);
 
- // Reset RESULT PAGE
+ // 🔁 RESET RESULT PAGE
  localStorage.removeItem("sketch");
  localStorage.setItem("status","idle");
 }
@@ -335,4 +302,3 @@ async function generate(){
 
 </body>
 </html>
-

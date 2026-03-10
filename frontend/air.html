@@ -22,6 +22,60 @@ body{
   height:100vh;
 }
 
+.preloader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #f4f7ff, #eef2ff);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.preloader.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.preloader-content {
+  text-align: center;
+}
+
+.spinner {
+  width: 60px;
+  height: 60px;
+  border: 4px solid #eef2ff;
+  border-top: 4px solid #6c8cff;
+  border-right: 4px solid #8fd3f4;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 20px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.preloader-text {
+  font-size: 18px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #6c8cff, #8fd3f4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.preloader-sub {
+  font-size: 14px;
+  color: #666;
+  margin-top: 8px;
+}
+
 .title{
   font-size:32px;
   font-weight:800;
@@ -120,6 +174,27 @@ button:hover{
   border:none;
 }
 
+.style-select{
+  display:flex;
+  gap:10px;
+  align-items:center;
+}
+
+.style-select select{
+  padding:10px 16px;
+  border-radius:12px;
+  border:2px solid #ddd;
+  background:white;
+  font-weight:600;
+  color:#333;
+  cursor:pointer;
+  outline:none;
+}
+
+.style-select select:focus{
+  border-color:var(--accent);
+}
+
 .instructions{
   margin-top:15px;
   font-size:12px;
@@ -134,6 +209,14 @@ button:hover{
 
 <body>
 
+<div class="preloader" id="preloader">
+  <div class="preloader-content">
+    <div class="spinner"></div>
+    <div class="preloader-text">Loading Air Canvas...</div>
+    <div class="preloader-sub">Initializing camera and hand tracking</div>
+  </div>
+</div>
+
 <div class="title">Air Canvas</div>
 
 <div class="workspace">
@@ -147,32 +230,23 @@ button:hover{
 
 </div>
 
-<div class="controls">
-
-<div class="colors">
-<div style="background:black" onclick="setColor('black')"></div>
-<div style="background:red" onclick="setColor('red')"></div>
-<div style="background:blue" onclick="setColor('blue')"></div>
-<div style="background:green" onclick="setColor('green')"></div>
-<div style="background:orange" onclick="setColor('orange')"></div>
-<input type="color" class="color-picker" onchange="setColor(this.value)">
-</div>
-
-<div class="buttons">
-<button onclick="clearCanvas()">Clear</button>
-</div>
-
+<div class="style-select">
+<label for="styleSelect">Style:</label>
+<select id="styleSelect" title="Select output style">
+<option value="realistic" selected>Realistic</option>
+<option value="animated">Animated</option>
+<option value="outline">Outline</option>
+</select>
 </div>
 
 <div class="instructions">
-🖐 Show open palm to start drawing | ✌️ 2 fingers = Clear canvas
+🖐 Show open palm to start drawing | ✌️ 2 fingers = Clear canvas | 🤟 3 fingers = Go to Draw Page
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
 <script>
-
 const video = document.getElementById("video")
 const canvas = document.getElementById("canvas")
 const ctx = canvas.getContext("2d")
@@ -180,15 +254,14 @@ const ctx = canvas.getContext("2d")
 const videoCanvas = document.getElementById("videoCanvas")
 const videoCtx = videoCanvas.getContext("2d")
 
+const preloader = document.getElementById("preloader")
+
 let prevX = null
 let prevY = null
 let drawColor = "black"
-let isGenerating = false
 
-// State: 0 = waiting, 1 = palm detected, 2 = drawing, 3 = clear gesture
 let handState = 0
 let palmDetectedTime = 0
-let lastFingerCount = 0
 
 function setColor(c){
  drawColor = c
@@ -198,14 +271,9 @@ function clearCanvas(){
  ctx.clearRect(0, 0, canvas.width, canvas.height)
  localStorage.removeItem("sketch");
  localStorage.setItem("status", "idle");
- isGenerating = false;
 }
 
 async function generate(){
- // Prevent multiple generations - only generate once until canvas is cleared
- if (isGenerating) return;
- isGenerating = true;
- 
  const exportCanvas=document.createElement("canvas");
  exportCanvas.width=canvas.width;
  exportCanvas.height=canvas.height;
@@ -217,22 +285,18 @@ async function generate(){
  const blob=await new Promise(r=>exportCanvas.toBlob(r,"image/png"));
  const reader=new FileReader();
 
- reader.onloadend=function(){
+ reader.onloadend=()=>{
    localStorage.setItem("sketch",reader.result);
-   localStorage.setItem("style","outline");
+   localStorage.setItem("style",document.getElementById("styleSelect").value);
    localStorage.setItem("status","idle");
    localStorage.setItem("status","generating");
-   
-   // Clear the canvas after triggering generation
-   ctx.clearRect(0, 0, canvas.width, canvas.height);
  };
  reader.readAsDataURL(blob);
 }
 
-// Initialize MediaPipe Hands
 const hands = new Hands({
- locateFile: (file) => {
- return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+ locateFile: function(file) {
+ return "https://cdn.jsdelivr.net/npm/@mediapipe/hands/" + file
  }
 })
 
@@ -243,51 +307,45 @@ hands.setOptions({
  minTrackingConfidence: 0.5
 })
 
-hands.onResults((results) => {
- // Draw video frame on video canvas
+let isFirstFrame = true;
+
+hands.onResults(function(results) {
+ if (isFirstFrame) {
+   isFirstFrame = false;
+   preloader.classList.add('hidden');
+ }
+
  videoCtx.save();
  videoCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
  videoCtx.drawImage(results.image, 0, 0, videoCanvas.width, videoCanvas.height);
  videoCtx.restore();
 
  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-   const landmarks = results.multiHandLandmarks[0]
+   var landmarks = results.multiHandLandmarks[0]
    
-   // Get key landmarks for fingertips
-   const idxTip = landmarks[8]
-   const midTip = landmarks[12]
-   const rngTip = landmarks[16]
-   const pkyTip = landmarks[20]
+   var idxTip = landmarks[8]
+   var midTip = landmarks[12]
+   var rngTip = landmarks[16]
+   var pkyTip = landmarks[20]
    
-   // Get PIP joints (middle joints)
-   const idxPip = landmarks[6]
-   const midPip = landmarks[10]
-   const rngPip = landmarks[14]
-   const pkyPip = landmarks[18]
+   var idxPip = landmarks[6]
+   var midPip = landmarks[10]
+   var rngPip = landmarks[14]
+   var pkyPip = landmarks[18]
    
-   // Get MCP joints (base joints)
-   const idxMcp = landmarks[5]
-   const midMcp = landmarks[9]
-   const rngMcp = landmarks[13]
-   const pkyMcp = landmarks[17]
+   var idxMcp = landmarks[5]
+   var midMcp = landmarks[9]
+   var rngMcp = landmarks[13]
+   var pkyMcp = landmarks[17]
    
-   // Check finger extension
-   const indexExtended = idxTip.y < idxPip.y && idxPip.y < idxMcp.y
-   const midExtended = midTip.y < midPip.y && midPip.y < midMcp.y
-   const rngExtended = rngTip.y < rngPip.y && rngPip.y < rngMcp.y
-   const pkyExtended = pkyTip.y < pkyPip.y && pkyPip.y < pkyMcp.y
+   var indexExtended = idxTip.y < idxPip.y && idxPip.y < idxMcp.y
+   var midExtended = midTip.y < midPip.y && midPip.y < midMcp.y
+   var rngExtended = rngTip.y < rngPip.y && rngPip.y < rngMcp.y
+   var pkyExtended = pkyTip.y < pkyPip.y && pkyPip.y < pkyMcp.y
    
-   // Count extended fingers (excluding thumb)
-   let extendedFingers = 0;
-   if (indexExtended) extendedFingers++;
-   if (midExtended) extendedFingers++;
-   if (rngExtended) extendedFingers++;
-   if (pkyExtended) extendedFingers++;
+   var isTwoFingers = indexExtended && midExtended && !rngExtended && !pkyExtended;
+   var isThreeFingers = indexExtended && midExtended && rngExtended && !pkyExtended;
    
-   // Check for 2 fingers gesture to clear (index + middle only)
-   const isTwoFingers = indexExtended && midExtended && !rngExtended && !pkyExtended;
-   
-   // Handle 2-finger clear gesture (only when not drawing)
    if (handState === 0 && isTwoFingers) {
      if (Date.now() - palmDetectedTime > 500) {
        clearCanvas();
@@ -295,20 +353,19 @@ hands.onResults((results) => {
      }
    }
    
-   // Draw hand landmarks
+   if (isThreeFingers) {
+     if (Date.now() - palmDetectedTime > 800) {
+       window.location.href = 'draw.html';
+       palmDetectedTime = Date.now();
+     }
+   }
+   
    drawHandLandmarks(landmarks)
    
-   // Check if open palm (all 4 fingers)
-   const isOpenPalm = indexExtended && midExtended && rngExtended && pkyExtended
+   var isOpenPalm = indexExtended && midExtended && rngExtended && pkyExtended
    
-   // Convert to drawing canvas coordinates
-   let x = (1 - idxTip.x) * canvas.width
-   let y = idxTip.y * canvas.height
-   
-   // State machine:
-   // State 0: Waiting for open palm
-   // State 1: Open palm detected, waiting for index finger up
-   // State 2: Drawing (index finger up)
+   var x = (1 - idxTip.x) * canvas.width
+   var y = idxTip.y * canvas.height
    
    if (isOpenPalm && handState === 0) {
      handState = 1
@@ -327,22 +384,18 @@ hands.onResults((results) => {
      }
    } else if (handState === 2) {
      if (isOpenPalm) {
-       if (Date.now() - palmDetectedTime > 200) {
-         generate();
-         handState = 0;
-         prevX = null;
-         prevY = null;
-       }
+       generate();
+       handState = 0;
+       prevX = null;
+       prevY = null;
        palmDetectedTime = Date.now();
-     } 
-     else if (!indexExtended && !midExtended && !rngExtended && !pkyExtended) {
+     } else if (!indexExtended && !midExtended && !rngExtended && !pkyExtended) {
        handState = 0
        prevX = null
        prevY = null
      }
    }
    
-   // Drawing logic
    if (handState === 2 && indexExtended) {
      if (prevX !== null) {
        ctx.beginPath()
@@ -364,7 +417,7 @@ hands.onResults((results) => {
 })
 
 function drawHandLandmarks(landmarks) {
- const connections = [
+ var connections = [
    [0,1],[1,2],[2,3],[3,7],[0,5],[5,6],[6,7],[0,9],[9,10],[10,11],
    [0,13],[13,14],[14,15],[0,17],[17,18],[18,19],[5,8],[9,12],[13,16],[17,20],[1,4]
  ]
@@ -372,9 +425,11 @@ function drawHandLandmarks(landmarks) {
  videoCtx.strokeStyle = "rgba(108, 140, 255, 0.8)"
  videoCtx.lineWidth = 2
  
- connections.forEach(function([start, end]) {
-   const p1 = landmarks[start]
-   const p2 = landmarks[end]
+ connections.forEach(function(conn) {
+   var start = conn[0];
+   var end = conn[1];
+   var p1 = landmarks[start]
+   var p2 = landmarks[end]
    videoCtx.beginPath()
    videoCtx.moveTo(p1.x * videoCanvas.width, p1.y * videoCanvas.height)
    videoCtx.lineTo(p2.x * videoCanvas.width, p2.y * videoCanvas.height)
@@ -382,8 +437,8 @@ function drawHandLandmarks(landmarks) {
  })
  
  landmarks.forEach(function(lm, i) {
-   const x = lm.x * videoCanvas.width
-   const y = lm.y * videoCanvas.height
+   var x = lm.x * videoCanvas.width
+   var y = lm.y * videoCanvas.height
    
    videoCtx.beginPath()
    videoCtx.arc(x, y, 4, 0, Math.PI * 2)
@@ -398,11 +453,11 @@ function drawHandLandmarks(landmarks) {
    videoCtx.fill()
  })
  
- const idx = landmarks[8]
- const idxX = idx.x * videoCanvas.width
- const idxY = idx.y * videoCanvas.height
+ var idx = landmarks[8]
+ var idxX = idx.x * videoCanvas.width
+ var idxY = idx.y * videoCanvas.height
  
- const gradient = videoCtx.createRadialGradient(idxX, idxY, 0, idxX, idxY, 20)
+ var gradient = videoCtx.createRadialGradient(idxX, idxY, 0, idxX, idxY, 20)
  gradient.addColorStop(0, "rgba(255, 0, 0, 0.5)")
  gradient.addColorStop(1, "rgba(255, 0, 0, 0)")
  videoCtx.beginPath()
@@ -411,8 +466,7 @@ function drawHandLandmarks(landmarks) {
  videoCtx.fill()
 }
 
-// Initialize camera
-const camera = new Camera(video, {
+var camera = new Camera(video, {
  onFrame: async function() {
    await hands.send({image: video})
  },
@@ -424,12 +478,12 @@ camera.start().then(function(){
  console.log("Camera started")
 }).catch(function(err){
  console.error("Camera error:", err)
+ preloader.classList.add('hidden');
 })
 
-// Video box drag functionality
-const box = document.getElementById("videoBox")
-let isDragging = false
-let offsetX, offsetY
+var box = document.getElementById("videoBox")
+var isDragging = false
+var offsetX, offsetY
 
 box.addEventListener("mousedown", function(e){
  isDragging = true
@@ -452,4 +506,3 @@ document.addEventListener("mouseup", function(){
 
 </body>
 </html>
-
