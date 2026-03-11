@@ -228,7 +228,10 @@ let currentStrokeColor="black"
 class InkStrokeModeler{
 
 constructor(){
-this.epsilon=6
+// Lower epsilon = more aggressive straightening (1 = very straight, 10 = curved)
+this.epsilon=20
+// More segments = smoother straight lines
+this.segments=50
 }
 
 distance(a,b){
@@ -296,7 +299,7 @@ const end=simplified[i+1]
 
 newPoints.push(start)
 
-const segments=8
+const segments=this.segments
 
 for(let j=1;j<segments;j++){
 
@@ -410,7 +413,7 @@ ctx.stroke()
 }
 
 // ==========================
-// HAND TRACKING
+// HAND TRACKING WITH GESTURE DETECTION
 // ==========================
 
 const hands=new Hands({
@@ -425,6 +428,85 @@ minTrackingConfidence:0.5
 })
 
 let wasDrawing=false
+let isDrawingMode=false // Drawing mode - starts with open palm gesture
+let gestureHoldTime=0 // Time to hold gesture for confirmation
+const GESTURE_HOLD_FRAMES=15 // Frames to hold gesture before action
+
+// Function to check if a finger is extended
+// Returns true if the fingertip is extended beyond the pip joint
+function isFingerExtended(lm, tipIdx, pipIdx, wristIdx) {
+  const tip = lm[tipIdx];
+  const pip = lm[pipIdx];
+  const wrist = lm[wristIdx];
+  
+  if (!tip || !pip || !wrist) return false;
+  
+  // Get the direction from wrist to pip
+  const wristToPipX = pip.x - wrist.x;
+  const wristToPipY = pip.y - wrist.y;
+  const wristToPipLen = Math.sqrt(wristToPipX * wristToPipX + wristToPipY * wristToPipY);
+  
+  // Get the direction from wrist to tip
+  const wristToTipX = tip.x - wrist.x;
+  const wristToTipY = tip.y - wrist.y;
+  const wristToTipLen = Math.sqrt(wristToTipX * wristToTipX + wristToTipY * wristToTipY);
+  
+  // Finger is extended if tip is further from wrist than pip
+  return wristToTipLen > wristToPipLen * 1.1;
+}
+
+// Function to detect hand gesture
+function detectGesture(lm) {
+  // MediaPipe landmark indices:
+  // 4: Thumb tip, 3: Thumb pip
+  // 8: Index tip, 6: Index pip  
+  // 12: Middle tip, 10: Middle pip
+  // 16: Ring tip, 14: Ring pip
+  // 20: Pinky tip, 18: Pinky pip
+  // 0: Wrist
+  
+  const thumbExtended = isFingerExtended(lm, 4, 3, 0);
+  const indexExtended = isFingerExtended(lm, 8, 6, 0);
+  const middleExtended = isFingerExtended(lm, 12, 10, 0);
+  const ringExtended = isFingerExtended(lm, 16, 14, 0);
+  const pinkyExtended = isFingerExtended(lm, 20, 18, 0);
+  
+  const extendedCount = [thumbExtended, indexExtended, middleExtended, ringExtended, pinkyExtended].filter(Boolean).length;
+  
+  // Open palm: 4 or more fingers extended
+  if (extendedCount >= 4) {
+    return 'open_palm';
+  }
+  
+  // Three fingers: index, middle, ring extended (for going back to draw.html)
+  if (indexExtended && middleExtended && ringExtended && !pinkyExtended) {
+    return 'three_fingers';
+  }
+  
+  // Two fingers (peace sign): index and middle extended
+  if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
+    return 'two_fingers';
+  }
+  
+  // Index finger only: index extended, others folded
+  if (indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
+    return 'index_finger';
+  }
+  
+  return 'other';
+}
+
+// Add status indicator for drawing mode
+const statusDiv = document.createElement('div');
+statusDiv.id = 'statusIndicator';
+statusDiv.style.cssText = 'position:fixed;top:10px;left:10px;background:rgba(0,0,0,0.7);color:#fff;padding:8px 12px;border-radius:5px;font-size:14px;z-index:9999;';
+statusDiv.textContent = '✋ Show Open Palm to Start';
+document.body.appendChild(statusDiv);
+
+function updateStatus(text, color) {
+  statusDiv.textContent = text;
+  statusDiv.style.background = color || 'rgba(0,0,0,0.7)';
+}
 
 hands.onResults(function(results){
 
@@ -437,30 +519,48 @@ videoCtx.drawImage(results.image,0,0,180,135)
 if(results.multiHandLandmarks && 
    results.multiHandLandmarks.length > 0 && 
    results.multiHandLandmarks[0] &&
-   results.multiHandLandmarks[0].length >= 9){
+   results.multiHandLandmarks[0].length >= 21){
 
 const lm=results.multiHandLandmarks[0]
+const gesture = detectGesture(lm);
+
+// Handle gesture detection with hold time
+if (gesture === 'open_palm') {
+  gestureHoldTime++;
+  if (gestureHoldTime >= GESTURE_HOLD_FRAMES && !isDrawingMode) {
+    isDrawingMode = true;
+    updateStatus('✏️ Drawing Mode - Use Index Finger', '#4CAF50');
+    gestureHoldTime = 0;
+  }
+} else if (gesture === 'two_fingers') {
+  // Two fingers = clear canvas
+  gestureHoldTime++;
+  if (gestureHoldTime >= GESTURE_HOLD_FRAMES) {
+    clearCanvas();
+    updateStatus('🗑️ Canvas Cleared', '#ff9800');
+    gestureHoldTime = 0;
+  }
+} else if (gesture === 'three_fingers') {
+  // Three fingers = go back to draw.html
+  gestureHoldTime++;
+  if (gestureHoldTime >= GESTURE_HOLD_FRAMES) {
+    window.location.href = 'draw.html';
+    gestureHoldTime = 0;
+  }
+} else {
+  gestureHoldTime = 0;
+}
+
+// Only draw if in drawing mode AND index finger is detected
+if (isDrawingMode && gesture === 'index_finger') {
 
 const idx=lm[8]
 const pip=lm[6]
 
-// Verify both landmarks exist
 if(idx && pip) {
-
-const indexExtended=idx.y<pip.y
 
 const x=(1-idx.x)*canvas.width
 const y=idx.y*canvas.height
-
-const isDrawing=indexExtended
-
-if(wasDrawing && !isDrawing){
-processCompletedStroke()
-}
-
-wasDrawing=isDrawing
-
-if(isDrawing){
 
 if(prevX!==null){
 
@@ -484,24 +584,31 @@ currentStrokeColor=drawColor
 
 prevX=x
 prevY=y
-
-}else{
-
-prevX=null
-prevY=null
-
-}
+wasDrawing=true
 
 }
 
 } else {
-  // No hand detected - reset drawing state
-  if(wasDrawing) {
-    processCompletedStroke()
+  // Index finger not extended - stop drawing
+  if (wasDrawing) {
+    processCompletedStroke();
+    wasDrawing = false;
   }
-  wasDrawing = false
-  prevX = null
-  prevY = null
+  prevX = null;
+  prevY = null;
+}
+
+} else {
+  // No hand detected
+  if (wasDrawing) {
+    processCompletedStroke();
+    wasDrawing = false;
+  }
+  isDrawingMode = false;
+  prevX = null;
+  prevY = null;
+  gestureHoldTime = 0;
+  updateStatus('✋ Show Open Palm to Start', '#607d8b');
 }
 
 })
