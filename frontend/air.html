@@ -42,10 +42,6 @@ body{
   visibility: hidden;
 }
 
-.preloader-content {
-  text-align: center;
-}
-
 .spinner {
   width: 60px;
   height: 60px;
@@ -54,26 +50,12 @@ body{
   border-right: 4px solid #8fd3f4;
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin: 0 auto 20px;
+  margin-bottom:20px;
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.preloader-text {
-  font-size: 18px;
-  font-weight: 600;
-  background: linear-gradient(135deg, #6c8cff, #8fd3f4);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.preloader-sub {
-  font-size: 14px;
-  color: #666;
-  margin-top: 8px;
+  0% { transform: rotate(0deg);}
+  100% { transform: rotate(360deg);}
 }
 
 .title{
@@ -119,11 +101,40 @@ canvas{
 #videoCanvas{
   width:100%;
   height:100%;
-  object-fit:cover;
 }
 
-video{
-  display:none;
+/* Make video visible for debugging - can be hidden later */
+#video{
+  width:180px;
+  height:135px;
+  transform:scaleX(-1);
+}
+
+.error-message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #ff4444;
+  color: white;
+  padding: 20px;
+  border-radius: 10px;
+  z-index: 10000;
+  max-width: 400px;
+  text-align: center;
+}
+
+.debug-info {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  background: rgba(0,0,0,0.7);
+  color: #0f0;
+  padding: 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: monospace;
+  z-index: 9999;
 }
 
 .controls{
@@ -132,26 +143,6 @@ video{
   flex-direction:column;
   align-items:center;
   gap:12px;
-}
-
-.buttons{
-  display:flex;
-  gap:10px;
-}
-
-button{
-  padding:12px 20px;
-  border:none;
-  border-radius:16px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  color:white;
-  font-weight:600;
-  cursor:pointer;
-  box-shadow:0 6px 20px rgba(108,140,255,.3);
-}
-
-button:hover{
-  transform:scale(1.05);
 }
 
 .colors{
@@ -174,27 +165,6 @@ button:hover{
   border:none;
 }
 
-.style-select{
-  display:flex;
-  gap:10px;
-  align-items:center;
-}
-
-.style-select select{
-  padding:10px 16px;
-  border-radius:12px;
-  border:2px solid #ddd;
-  background:white;
-  font-weight:600;
-  color:#333;
-  cursor:pointer;
-  outline:none;
-}
-
-.style-select select:focus{
-  border-color:var(--accent);
-}
-
 .instructions{
   margin-top:15px;
   font-size:12px;
@@ -210,499 +180,494 @@ button:hover{
 <body>
 
 <div class="preloader" id="preloader">
-  <div class="preloader-content">
-    <div class="spinner"></div>
-    <div class="preloader-text">Loading Air Canvas...</div>
-    <div class="preloader-sub">Initializing camera and hand tracking</div>
-  </div>
+<div class="spinner"></div>
+<div>Loading Air Canvas...</div>
 </div>
 
 <div class="title">Air Canvas</div>
 
 <div class="workspace">
-
 <canvas id="canvas" width="700" height="500"></canvas>
 
 <div class="videoBox" id="videoBox">
 <canvas id="videoCanvas" width="180" height="135"></canvas>
 <video id="video" autoplay playsinline></video>
 </div>
-
 </div>
 
-<div class="style-select">
-<label for="styleSelect">Style:</label>
-<select id="styleSelect" title="Select output style">
-<option value="realistic" selected>Realistic</option>
-<option value="animated">Animated</option>
-<option value="outline">Outline</option>
-</select>
+<div class="colors" style="margin-top:10px;">
+<div style="background:black" onclick="setColor('black')"></div>
+<div style="background:red" onclick="setColor('red')"></div>
+<div style="background:blue" onclick="setColor('blue')"></div>
+<div style="background:green" onclick="setColor('green')"></div>
+<input type="color" class="color-picker" onchange="setColor(this.value)">
 </div>
 
-<div class="colors" style="margin-top: 10px;">
-  <div style="background:black" onclick="setColor('black')"></div>
-  <div style="background:red" onclick="setColor('red')"></div>
-  <div style="background:blue" onclick="setColor('blue')"></div>
-  <div style="background:green" onclick="setColor('green')"></div>
-  <input type="color" id="colorPicker" class="color-picker" value="#000000" onchange="setColor(this.value)">
-</div>
-
-<div class="style-select" style="margin-top: 10px;">
-  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-    <input type="checkbox" id="straightenToggle" checked style="width: 18px; height: 18px; cursor: pointer;">
-    <span style="font-weight: 600; color: #333;">Line Straightening</span>
-  </label>
-</div>
+<label style="margin-top:10px;">
+<input type="checkbox" id="straightenToggle" checked>
+Line Straightening
+</label>
 
 <div class="instructions">
-🖐 Show open palm to start drawing | ✌️ 2 fingers = Clear canvas | 🤟 3 fingers = Go to Draw Page
+🖐 Open palm = Start | ✌️ Clear | 🤟 Draw Page
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-<!-- Google Ink Stroke Modeler for line straightening -->
-<script src="https://unpkg.com/@google/modelviewer@1.12.0/lib/model-viewer.js"></script>
-
 <script>
-// ============================================
-// Line Straightening Module - Straightens AFTER stroke completion
-// ============================================
 
-// Store all strokes drawn on the canvas
-let allStrokes = []; // Array of {points: [{x,y}], color: string}
-let currentStrokePoints = [];
-let currentStrokeColor = "black";
+// ==========================
+// SHAPE SIMPLIFICATION ENGINE
+// ==========================
 
-class InkStrokeModeler {
-  constructor() {
-    this.lineThreshold = 0.7; // Threshold for line detection
-  }
+let allStrokes=[]
+let currentStrokePoints=[]
+let currentStrokeColor="black"
 
-  /**
-   * Analyze if the stroke resembles a line and return straightened points
-   */
-  straightenStroke(points) {
-    if (!points || points.length < 3) {
-      return points; // Not enough points to analyze
-    }
+class InkStrokeModeler{
 
-    // Get first and last points
-    const start = points[0];
-    const end = points[points.length - 1];
-
-    // Calculate line direction
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const lineLength = Math.sqrt(dx * dx + dy * dy);
-
-    if (lineLength < 20) {
-      return points; // Too short to be a line
-    }
-
-    // Normalize direction
-    const dirX = dx / lineLength;
-    const dirY = dy / lineLength;
-
-    // Calculate how well each point fits the line
-    let totalFit = 0;
-
-    for (let i = 1; i < points.length - 1; i++) {
-      const p = points[i];
-
-      // Vector from start to point
-      const px = p.x - start.x;
-      const py = p.y - start.y;
-
-      // Project onto line direction
-      const projection = px * dirX + py * dirY;
-
-      // Perpendicular distance
-      const perpX = px - projection * dirX;
-      const perpY = py - projection * dirY;
-      const perpDist = Math.sqrt(perpX * perpX + perpY * perpY);
-
-      // Normalize by stroke length
-      const fit = Math.max(0, 1 - (perpDist / lineLength));
-      totalFit += fit;
-    }
-
-    const avgFit = totalFit / (points.length - 2);
-
-    // If it looks like a line, straighten it
-    if (avgFit > this.lineThreshold) {
-      const straightenedPoints = [];
-      
-      // Add start point
-      straightenedPoints.push({ x: start.x, y: start.y });
-
-      // Calculate intermediate points
-      for (let i = 1; i < points.length - 1; i++) {
-        const p = points[i];
-        const px = p.x - start.x;
-        const py = p.y - start.y;
-        
-        // Project onto line
-        const projection = px * dirX + py * dirY;
-        
-        straightenedPoints.push({
-          x: start.x + projection * dirX,
-          y: start.y + projection * dirY
-        });
-      }
-
-      // Add end point
-      straightenedPoints.push({ x: end.x, y: end.y });
-
-      return straightenedPoints;
-    }
-
-    return points; // Return original if not detected as line
-  }
+constructor(){
+this.epsilon=6
 }
 
-// Create global instance
-const inkModeler = new InkStrokeModeler();
+distance(a,b){
+return Math.sqrt(
+(a.x-b.x)*(a.x-b.x)+
+(a.y-b.y)*(a.y-b.y))
+}
 
-const video = document.getElementById("video")
-const canvas = document.getElementById("canvas")
-const ctx = canvas.getContext("2d")
+perpendicularDistance(p,start,end){
 
-const videoCanvas = document.getElementById("videoCanvas")
-const videoCtx = videoCanvas.getContext("2d")
+const dx=end.x-start.x
+const dy=end.y-start.y
 
-const preloader = document.getElementById("preloader")
+if(dx===0 && dy===0) return this.distance(p,start)
 
-let prevX = null
-let prevY = null
-let drawColor = "black"
+const t=((p.x-start.x)*dx+(p.y-start.y)*dy)/(dx*dx+dy*dy)
 
-// Line straightening enabled by default
-let lineStraighteningEnabled = true;
+const projX=start.x+t*dx
+const projY=start.y+t*dy
 
-let handState = 0
-let palmDetectedTime = 0
+return this.distance(p,{x:projX,y:projY})
+}
+
+simplify(points){
+
+if(points.length<3) return points
+
+let maxDist=0
+let index=0
+const end=points.length-1
+
+for(let i=1;i<end;i++){
+
+const d=this.perpendicularDistance(points[i],points[0],points[end])
+
+if(d>maxDist){
+index=i
+maxDist=d
+}
+
+}
+
+if(maxDist>this.epsilon){
+
+const rec1=this.simplify(points.slice(0,index+1))
+const rec2=this.simplify(points.slice(index))
+
+return rec1.slice(0,-1).concat(rec2)
+
+}
+
+return [points[0],points[end]]
+}
+
+straightenStroke(points){
+
+const simplified=this.simplify(points)
+
+const newPoints=[]
+
+for(let i=0;i<simplified.length-1;i++){
+
+const start=simplified[i]
+const end=simplified[i+1]
+
+newPoints.push(start)
+
+const segments=8
+
+for(let j=1;j<segments;j++){
+
+const t=j/segments
+
+newPoints.push({
+x:start.x+(end.x-start.x)*t,
+y:start.y+(end.y-start.y)*t
+})
+
+}
+
+}
+
+newPoints.push(simplified[simplified.length-1])
+
+return newPoints
+}
+
+}
+
+const inkModeler=new InkStrokeModeler()
+
+// ==========================
+// CANVAS SETUP
+// ==========================
+
+const video=document.getElementById("video")
+const canvas=document.getElementById("canvas")
+const ctx=canvas.getContext("2d")
+
+const videoCanvas=document.getElementById("videoCanvas")
+const videoCtx=videoCanvas.getContext("2d")
+
+const preloader=document.getElementById("preloader")
+
+let prevX=null
+let prevY=null
+let drawColor="black"
+
+let lineStraighteningEnabled=true
 
 function setColor(c){
- drawColor = c
+drawColor=c
 }
 
 function clearCanvas(){
- ctx.clearRect(0, 0, canvas.width, canvas.height)
- allStrokes = [];
- currentStrokePoints = [];
- localStorage.removeItem("sketch");
- localStorage.setItem("status", "idle");
+ctx.clearRect(0,0,canvas.width,canvas.height)
+allStrokes=[]
+currentStrokePoints=[]
 }
 
-// Process and straighten the completed stroke
-function processCompletedStroke() {
-  if (!lineStraighteningEnabled || currentStrokePoints.length < 3) {
-    // Just save the stroke as-is
-    if (currentStrokePoints.length > 0) {
-      allStrokes.push({
-        points: [...currentStrokePoints],
-        color: currentStrokeColor
-      });
-    }
-    currentStrokePoints = [];
-    return;
-  }
+// ==========================
+// STROKE PROCESSING
+// ==========================
 
-  // Analyze and straighten
-  const straightenedPoints = inkModeler.straightenStroke(currentStrokePoints);
-  
-  // Save the straightened stroke
-  allStrokes.push({
-    points: straightenedPoints,
-    color: currentStrokeColor
-  });
+function processCompletedStroke(){
 
-  // Clear and redraw everything with the straightened stroke
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  
-  allStrokes.forEach(stroke => {
-    if (stroke.points.length < 2) return;
-    
-    ctx.beginPath();
-    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-    
-    for (let i = 1; i < stroke.points.length; i++) {
-      ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
-    }
-    
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = 5;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.stroke();
-  });
+if(!lineStraighteningEnabled || currentStrokePoints.length<3){
 
-  currentStrokePoints = [];
+if(currentStrokePoints.length>0){
+
+allStrokes.push({
+points:[...currentStrokePoints],
+color:currentStrokeColor
+})
+
 }
 
-async function generate(){
- const exportCanvas=document.createElement("canvas");
- exportCanvas.width=canvas.width;
- exportCanvas.height=canvas.height;
- const ectx=exportCanvas.getContext("2d");
- ectx.fillStyle="white";
- ectx.fillRect(0,0,exportCanvas.width,exportCanvas.height);
- ectx.drawImage(canvas,0,0);
+currentStrokePoints=[]
+return
 
- const blob=await new Promise(r=>exportCanvas.toBlob(r,"image/png"));
- const reader=new FileReader();
-
- reader.onloadend=()=>{
-   localStorage.setItem("sketch",reader.result);
-   localStorage.setItem("style",document.getElementById("styleSelect").value);
-   localStorage.setItem("status","idle");
-   localStorage.setItem("status","generating");
- };
- reader.readAsDataURL(blob);
 }
 
-const hands = new Hands({
- locateFile: function(file) {
- return "https://cdn.jsdelivr.net/npm/@mediapipe/hands/" + file
- }
+const clean=inkModeler.straightenStroke(currentStrokePoints)
+
+allStrokes.push({
+points:clean,
+color:currentStrokeColor
+})
+
+redraw()
+
+currentStrokePoints=[]
+}
+
+function redraw(){
+
+ctx.clearRect(0,0,canvas.width,canvas.height)
+
+allStrokes.forEach(stroke=>{
+
+if(stroke.points.length<2) return
+
+ctx.beginPath()
+
+ctx.moveTo(stroke.points[0].x,stroke.points[0].y)
+
+for(let i=1;i<stroke.points.length;i++){
+ctx.lineTo(stroke.points[i].x,stroke.points[i].y)
+}
+
+ctx.strokeStyle=stroke.color
+ctx.lineWidth=5
+ctx.lineCap="round"
+ctx.lineJoin="round"
+ctx.stroke()
+
+})
+
+}
+
+// ==========================
+// HAND TRACKING
+// ==========================
+
+const hands=new Hands({
+locateFile:file=>"https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file
 })
 
 hands.setOptions({
- maxNumHands: 1,
- modelComplexity: 1,
- minDetectionConfidence: 0.5,
- minTrackingConfidence: 0.5
+maxNumHands:1,
+modelComplexity:1,
+minDetectionConfidence:0.5,
+minTrackingConfidence:0.5
 })
 
-let isFirstFrame = true;
-let wasDrawing = false;
+let wasDrawing=false
 
-hands.onResults(function(results) {
- if (isFirstFrame) {
-   isFirstFrame = false;
-   preloader.classList.add('hidden');
- }
+hands.onResults(function(results){
 
- videoCtx.save();
- videoCtx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
- videoCtx.drawImage(results.image, 0, 0, videoCanvas.width, videoCanvas.height);
- videoCtx.restore();
+if(preloader) preloader.classList.add("hidden")
 
- if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-   var landmarks = results.multiHandLandmarks[0]
-   
-   var idxTip = landmarks[8]
-   var midTip = landmarks[12]
-   var rngTip = landmarks[16]
-   var pkyTip = landmarks[20]
-   
-   var idxPip = landmarks[6]
-   var midPip = landmarks[10]
-   var rngPip = landmarks[14]
-   var pkyPip = landmarks[18]
-   
-   var idxMcp = landmarks[5]
-   var midMcp = landmarks[9]
-   var rngMcp = landmarks[13]
-   var pkyMcp = landmarks[17]
-   
-   var indexExtended = idxTip.y < idxPip.y && idxPip.y < idxMcp.y
-   var midExtended = midTip.y < midPip.y && midPip.y < midMcp.y
-   var rngExtended = rngTip.y < rngPip.y && rngPip.y < rngMcp.y
-   var pkyExtended = pkyTip.y < pkyPip.y && pkyPip.y < pkyMcp.y
-   
-   var isTwoFingers = indexExtended && midExtended && !rngExtended && !pkyExtended;
-   var isThreeFingers = indexExtended && midExtended && rngExtended && !pkyExtended;
-   
-   if (handState === 0 && isTwoFingers) {
-     if (Date.now() - palmDetectedTime > 500) {
-       clearCanvas();
-       palmDetectedTime = Date.now();
-     }
-   }
-   
-   if (isThreeFingers) {
-     if (Date.now() - palmDetectedTime > 800) {
-       window.location.href = 'draw.html';
-       palmDetectedTime = Date.now();
-     }
-   }
-   
-   drawHandLandmarks(landmarks)
-   
-   var isOpenPalm = indexExtended && midExtended && rngExtended && pkyExtended
-   
-   var x = (1 - idxTip.x) * canvas.width
-   var y = idxTip.y * canvas.height
-   
-   if (isOpenPalm && handState === 0) {
-     handState = 1
-     palmDetectedTime = Date.now()
-   } else if (handState === 1) {
-     if (isOpenPalm) {
-       if (Date.now() - palmDetectedTime > 500) {
-         handState = 2
-       }
-     } else {
-       if (indexExtended && !midExtended && !rngExtended && !pkyExtended) {
-         handState = 2
-       } else {
-         handState = 0
-       }
-     }
-   } else if (handState === 2) {
-     if (isOpenPalm) {
-       generate();
-       handState = 0;
-       prevX = null;
-       prevY = null;
-       palmDetectedTime = Date.now();
-     } else if (!indexExtended && !midExtended && !rngExtended && !pkyExtended) {
-       handState = 0
-       prevX = null
-       prevY = null
-     }
-   }
-   
-   // Check if drawing state changed
-   const isDrawing = (handState === 2 && indexExtended);
-   
-   // If just stopped drawing, process the completed stroke
-   if (wasDrawing && !isDrawing) {
-     // Stroke completed - process it!
-     processCompletedStroke();
-   }
-   wasDrawing = isDrawing;
-   
-   if (isDrawing) {
-     if (prevX !== null) {
-       // Draw normally while drawing
-       ctx.beginPath()
-       ctx.moveTo(prevX, prevY)
-       ctx.lineTo(x, y)
-       ctx.strokeStyle = drawColor
-       ctx.lineWidth = 5
-       ctx.lineCap = "round"
-       ctx.lineJoin = "round"
-       ctx.stroke()
-       
-       // Store point for later processing
-       currentStrokePoints.push({x: x, y: y});
-       currentStrokeColor = drawColor;
-       
-       prevX = x
-       prevY = y
-     } else {
-       // First point of stroke
-       currentStrokePoints = [{x: x, y: y}];
-       currentStrokeColor = drawColor;
-       prevX = x
-       prevY = y
-     }
-   } else {
-     prevX = null
-     prevY = null
-   }
- }
-})
+videoCtx.clearRect(0,0,180,135)
+videoCtx.drawImage(results.image,0,0,180,135)
 
-function drawHandLandmarks(landmarks) {
- var connections = [
-   [0,1],[1,2],[2,3],[3,7],[0,5],[5,6],[6,7],[0,9],[9,10],[10,11],
-   [0,13],[13,14],[14,15],[0,17],[17,18],[18,19],[5,8],[9,12],[13,16],[17,20],[1,4]
- ]
- 
- videoCtx.strokeStyle = "rgba(108, 140, 255, 0.8)"
- videoCtx.lineWidth = 2
- 
- connections.forEach(function(conn) {
-   var start = conn[0];
-   var end = conn[1];
-   var p1 = landmarks[start]
-   var p2 = landmarks[end]
-   videoCtx.beginPath()
-   videoCtx.moveTo(p1.x * videoCanvas.width, p1.y * videoCanvas.height)
-   videoCtx.lineTo(p2.x * videoCanvas.width, p2.y * videoCanvas.height)
-   videoCtx.stroke()
- })
- 
- landmarks.forEach(function(lm, i) {
-   var x = lm.x * videoCanvas.width
-   var y = lm.y * videoCanvas.height
-   
-   videoCtx.beginPath()
-   videoCtx.arc(x, y, 4, 0, Math.PI * 2)
-   
-   if (i === 8) {
-     videoCtx.fillStyle = "#ff0000"
-   } else if (i === 4) {
-     videoCtx.fillStyle = "#00ff00"
-   } else {
-     videoCtx.fillStyle = "#6c8cff"
-   }
-   videoCtx.fill()
- })
- 
- var idx = landmarks[8]
- var idxX = idx.x * videoCanvas.width
- var idxY = idx.y * videoCanvas.height
- 
- var gradient = videoCtx.createRadialGradient(idxX, idxY, 0, idxX, idxY, 20)
- gradient.addColorStop(0, "rgba(255, 0, 0, 0.5)")
- gradient.addColorStop(1, "rgba(255, 0, 0, 0)")
- videoCtx.beginPath()
- videoCtx.arc(idxX, idxY, 20, 0, Math.PI * 2)
- videoCtx.fillStyle = gradient
- videoCtx.fill()
+// Check if hand landmarks exist and have the required points
+if(results.multiHandLandmarks && 
+   results.multiHandLandmarks.length > 0 && 
+   results.multiHandLandmarks[0] &&
+   results.multiHandLandmarks[0].length >= 9){
+
+const lm=results.multiHandLandmarks[0]
+
+const idx=lm[8]
+const pip=lm[6]
+
+// Verify both landmarks exist
+if(idx && pip) {
+
+const indexExtended=idx.y<pip.y
+
+const x=(1-idx.x)*canvas.width
+const y=idx.y*canvas.height
+
+const isDrawing=indexExtended
+
+if(wasDrawing && !isDrawing){
+processCompletedStroke()
 }
 
-var camera = new Camera(video, {
- onFrame: async function() {
-   await hands.send({image: video})
- },
- width: 640,
- height: 480
+wasDrawing=isDrawing
+
+if(isDrawing){
+
+if(prevX!==null){
+
+ctx.beginPath()
+ctx.moveTo(prevX,prevY)
+ctx.lineTo(x,y)
+
+ctx.strokeStyle=drawColor
+ctx.lineWidth=5
+ctx.stroke()
+
+currentStrokePoints.push({x,y})
+currentStrokeColor=drawColor
+
+}else{
+
+currentStrokePoints=[{x,y}]
+currentStrokeColor=drawColor
+
+}
+
+prevX=x
+prevY=y
+
+}else{
+
+prevX=null
+prevY=null
+
+}
+
+}
+
+} else {
+  // No hand detected - reset drawing state
+  if(wasDrawing) {
+    processCompletedStroke()
+  }
+  wasDrawing = false
+  prevX = null
+  prevY = null
+}
+
 })
 
-camera.start().then(function(){
- console.log("Camera started")
-}).catch(function(err){
- console.error("Camera error:", err)
- preloader.classList.add('hidden');
-})
+// ==========================
+// CAMERA - Robust initialization with error handling
+// ==========================
 
-var box = document.getElementById("videoBox")
-var isDragging = false
-var offsetX, offsetY
+let camera = null;
+let isCameraStarted = false;
 
-box.addEventListener("mousedown", function(e){
- isDragging = true
- offsetX = e.clientX - box.offsetLeft
- offsetY = e.clientY - box.offsetTop
-})
+// Debug function to update status
+function updateDebugInfo(msg) {
+  console.log('[Camera]', msg);
+  const debugEl = document.getElementById('debugInfo');
+  if (debugEl) {
+    debugEl.textContent = msg;
+  }
+}
 
-document.addEventListener("mousemove", function(e){
- if (isDragging) {
-   box.style.left = (e.clientX - offsetX) + "px"
-   box.style.top = (e.clientY - offsetY) + "px"
- }
-})
+// Error display function
+function showError(message) {
+  // Remove existing error
+  const existing = document.querySelector('.error-message');
+  if (existing) existing.remove();
+  
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'error-message';
+  errorDiv.innerHTML = `
+    <h3>⚠️ Error</h3>
+    <p>${message}</p>
+    <button onclick="location.reload()" style="margin-top:10px;padding:8px 16px;cursor:pointer;">
+      Retry
+    </button>
+  `;
+  document.body.appendChild(errorDiv);
+}
 
-document.addEventListener("mouseup", function(){
- isDragging = false
-})
+// Check if MediaPipe is loaded
+function checkMediaPipeLoaded() {
+  updateDebugInfo('Checking MediaPipe...');
+  
+  if (typeof Hands === 'undefined') {
+    showError('MediaPipe Hands not loaded. Check internet connection.');
+    return false;
+  }
+  if (typeof Camera === 'undefined') {
+    updateDebugInfo('Camera class not found, using fallback...');
+    return false;
+  }
+  return true;
+}
 
-// Line straightening toggle
-document.getElementById('straightenToggle').addEventListener('change', function(e) {
-  lineStraighteningEnabled = e.target.checked;
-  // Reset the modeler when toggling
-  inkModeler.reset();
-  console.log('Line straightening:', lineStraighteningEnabled ? 'enabled' : 'disabled');
+// Initialize camera with fallback
+async function initCamera() {
+  updateDebugInfo('Initializing camera...');
+  
+  try {
+    // First check MediaPipe
+    if (!checkMediaPipeLoaded()) {
+      updateDebugInfo('Using fallback camera method...');
+      await initCameraFallback();
+      return;
+    }
+    
+    // Try MediaPipe Camera class
+    camera = new Camera(video, {
+      onFrame: async () => {
+        if (video.readyState === 4) {
+          await hands.send({ image: video });
+        }
+      },
+      width: 640,
+      height: 480
+    });
+    
+    await camera.start();
+    isCameraStarted = true;
+    updateDebugInfo('Camera started (MediaPipe)');
+    
+  } catch (error) {
+    console.error('Camera init error:', error);
+    updateDebugInfo('MediaPipe Camera failed, trying fallback...');
+    await initCameraFallback();
+  }
+}
+
+// Fallback camera initialization using getUserMedia directly
+async function initCameraFallback() {
+  updateDebugInfo('Requesting camera permission...');
+  
+  try {
+    // Request camera access directly
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        facingMode: 'user'
+      }
+    });
+    
+    video.srcObject = stream;
+    
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => {
+        video.play();
+        resolve();
+      };
+    });
+    
+    isCameraStarted = true;
+    updateDebugInfo('Camera started (Fallback)');
+    
+    // Start processing loop
+    processVideoFrame();
+    
+  } catch (error) {
+    console.error('Camera fallback error:', error);
+    showError(`Camera access denied: ${error.message}. Please allow camera access and try again.`);
+  }
+}
+
+// Process video frames (fallback method)
+async function processVideoFrame() {
+  if (!isCameraStarted || video.paused || video.ended) {
+    requestAnimationFrame(processVideoFrame);
+    return;
+  }
+  
+  try {
+    if (video.readyState === 4) {
+      await hands.send({ image: video });
+    }
+  } catch (e) {
+    console.error('Frame processing error:', e);
+  }
+  
+  requestAnimationFrame(processVideoFrame);
+}
+
+// Initialize on page load
+window.addEventListener('load', async () => {
+  updateDebugInfo('Page loaded, starting camera...');
+  
+  // Small delay to ensure MediaPipe scripts are loaded
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  await initCamera();
 });
+
+// Add debug info element
+const debugDiv = document.createElement('div');
+debugDiv.id = 'debugInfo';
+debugDiv.className = 'debug-info';
+debugDiv.textContent = 'Initializing...';
+document.body.appendChild(debugDiv);
+
+// ==========================
+// TOGGLE
+// ==========================
+
+document.getElementById("straightenToggle").addEventListener("change",e=>{
+lineStraighteningEnabled=e.target.checked
+})
 
 </script>
 
 </body>
 </html>
-
