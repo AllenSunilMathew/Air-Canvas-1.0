@@ -225,6 +225,101 @@ let allStrokes=[]
 let currentStrokePoints=[]
 let currentStrokeColor="black"
 
+// Shape Detector class for detecting and correcting geometric shapes
+class ShapeDetector {
+  // Calculate angle at vertex p2 formed by p1-p2-p3
+  getAngle(p1, p2, p3) {
+    const v1x = p1.x - p2.x, v1y = p1.y - p2.y;
+    const v2x = p3.x - p2.x, v2y = p3.y - p2.y;
+    const dot = v1x * v2x + v1y * v2y;
+    const mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+    const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+    if (mag1 === 0 || mag2 === 0) return 0;
+    const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
+    return Math.acos(cosAngle) * 180 / Math.PI;
+  }
+  
+  // Detect corners in the stroke
+  detectCorners(points, threshold = 25) {
+    if (points.length < 5) return [points[0], points[points.length - 1]];
+    
+    const corners = [points[0]];
+    const window = 3;
+    
+    for (let i = window; i < points.length - window; i++) {
+      const prev = points[i - window];
+      const curr = points[i];
+      const next = points[i + window];
+      
+      const angle = this.getAngle(prev, curr, next);
+      if (angle < 180 - threshold || angle > 180 + threshold) {
+        corners.push(curr);
+      }
+    }
+    
+    corners.push(points[points.length - 1]);
+    return corners;
+  }
+  
+  // Correct angles to perfect geometric angles
+  correctToPerfectShape(corners) {
+    if (corners.length < 3) return corners;
+    
+    const numCorners = corners.length;
+    let targetAngle;
+    
+    if (numCorners === 3) targetAngle = 60; // Triangle
+    else if (numCorners === 4) targetAngle = 90; // Square/Rectangle
+    else return corners;
+    
+    // Calculate center of shape
+    let cx = 0, cy = 0;
+    corners.forEach(p => { cx += p.x; cy += p.y; });
+    cx /= numCorners;
+    cy /= numCorners;
+    
+    // Sort corners by angle from center
+    const sorted = corners.map(p => ({
+      x: p.x,
+      y: p.y,
+      angle: Math.atan2(p.y - cy, p.x - cx)
+    })).sort((a, b) => a.angle - b.angle);
+    
+    // Calculate average radius
+    let avgRadius = 0;
+    sorted.forEach(p => {
+      avgRadius += Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
+    });
+    avgRadius /= numCorners;
+    
+    // Create corrected corners at perfect angles
+    const corrected = [];
+    for (let i = 0; i < numCorners; i++) {
+      const angle = (2 * Math.PI * i / numCorners) + sorted[0].angle;
+      corrected.push({
+        x: cx + avgRadius * Math.cos(angle),
+        y: cy + avgRadius * Math.sin(angle)
+      });
+    }
+    
+    return corrected;
+  }
+  
+  // Check if shape should be corrected (has valid number of corners)
+  shouldCorrect(corners) {
+    return corners.length === 3 || corners.length === 4;
+  }
+  
+  // Main function to detect and correct shape
+  process(points) {
+    const corners = this.detectCorners(points);
+    if (this.shouldCorrect(corners)) {
+      return this.correctToPerfectShape(corners);
+    }
+    return points;
+  }
+}
+
 class InkStrokeModeler{
 
 constructor(){
@@ -232,6 +327,8 @@ constructor(){
 this.epsilon=20
 // More segments = smoother straight lines
 this.segments=50
+// Enable shape detection and correction
+this.shapeDetector = new ShapeDetector()
 }
 
 distance(a,b){
@@ -374,7 +471,11 @@ return
 
 }
 
-const clean=inkModeler.straightenStroke(currentStrokePoints)
+// First straighten the stroke
+let clean=inkModeler.straightenStroke(currentStrokePoints)
+
+// Then detect and correct shape angles (triangle=60°, square/rectangle=90°)
+clean = inkModeler.shapeDetector.process(clean)
 
 allStrokes.push({
 points:clean,
