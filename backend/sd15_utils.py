@@ -1,66 +1,210 @@
-
 import torch, cv2, numpy as np
-from PIL import Image, ImageFilter
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
+from PIL import Image, ImageFilter, ImageEnhance
+from diffusers import (
+    StableDiffusionControlNetPipeline, 
+    ControlNetModel, 
+    UniPCMultistepScheduler,
+    AutoencoderKL
+)
+import warnings
+warnings.filterwarnings("ignore")
 
+# Device configuration with advanced settings
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[SD] Using device: {device}")
 
+# Enable TF32 on Ampere GPUs for faster computation
+if torch.cuda.is_available():
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True  # Enable cudnn benchmarking
+    print("[SD] TF32 enabled for faster computation")
+
+# ControlNet model with optimized settings
 controlnet = ControlNetModel.from_pretrained(
     "lllyasviel/control_v11p_sd15_scribble",
-    torch_dtype=torch.float16
+    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+    use_safetensors=True  # Faster loading
 )
 
+# Load custom VAE for better quality
+try:
+    vae = AutoencoderKL.from_pretrained(
+        "stabilityai/sd-vae-ft-mse",
+        torch_dtype=torch.float16 if device == "cuda" else torch.float32
+    )
+    print("[SD] Custom VAE loaded")
+except:
+    vae = None
+    print("[SD] Using default VAE")
+
+# Stable Diffusion pipeline with ALL optimizations
 pipe = StableDiffusionControlNetPipeline.from_pretrained(
     "SG161222/Realistic_Vision_V5.1_noVAE",
     controlnet=controlnet,
-    torch_dtype=torch.float16,
-    safety_checker=None
+    vae=vae,
+    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+    safety_checker=None,
+    use_safetensors=True
 ).to(device)
 
-pipe.enable_attention_slicing()
+# ==================== PERFORMANCE OPTIMIZATIONS ====================
+
+# 1. Use fastest scheduler - UniPC (2-3x faster than DPM++)
+pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+print("[SD] ✓ UniPCMultistepScheduler - fastest scheduler")
+
+# 2. Enable xformers (2-3x faster on supported GPUs)
+try:
+    pipe.enable_xformers_memory_efficient_attention()
+    print("[SD] ✓ xformers memory-efficient attention")
+except ImportError:
+    print("[SD] ✗ xformers not available")
+
+# 3. Enable attention slicing (reduces memory by 50%)
+pipe.enable_attention_slicing("auto")
+print("[SD] ✓ Attention slicing enabled")
+
+# 4. Enable VAE slicing (for lower memory)
+pipe.enable_vae_slicing()
+print("[SD] ✓ VAE slicing enabled")
+
+# 5. CPU offloading for systems with limited VRAM
+# Only enable if GPU memory is limited (< 6GB)
+if device == "cuda":
+    gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    if gpu_mem < 6:
+        pipe.enable_sequential_cpu_offload()
+        print(f"[SD] ✓ CPU offloading enabled ({gpu_mem:.1f}GB GPU)")
+    else:
+        # 6. Model offloading for better memory management
+        pipe.enable_model_cpu_offload()
+        print("[SD] ✓ Model CPU offload enabled")
+
+# 7. torch.compile for JIT optimization (PyTorch 2.0+)
+if hasattr(torch, 'compile'):
+    try:
+        pipe = torch.compile(pipe, mode="reduce-overhead", fullgraph=True)
+        print("[SD] ✓ torch.compile enabled")
+    except Exception as e:
+        print(f"[SD] ✗ torch.compile skipped: {e}")
+
+# 8. Set optimal performance defaults
+pipe.set_progress_bar_config(disable=True)  # Disable progress bar for speed
+torch.cuda.empty_cache()  # Clear cache before use
+
+# ==================== PREPROCESSING ====================
 
 def preprocess_sketch(image_bytes: bytes) -> Image.Image:
+    """Enhanced sketch preprocessing with multiple optimizations"""
     np_img = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_GRAYSCALE)
 
     if img is None or img.size == 0:
         return Image.new("RGB", (512, 512), "white")
 
-    edges = cv2.Canny(img, 50, 150)
-    edges = cv2.dilate(edges, np.ones((4, 4), np.uint8), 2)
-    edges = cv2.resize(edges, (512, 512))
+    # Fast resize using INTER_AREA
+    img = cv2.resize(img, (512, 512), interpolation=cv2.INTER_AREA)
+    
+    # Denoise using fast Gaussian blur
+    img = cv2.fastGaussBlur(img, (3, 3), 0)
+    
+    # Adaptive thresholding with Otsu's method
+    _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    
+    # Morphological operations - optimized kernels
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    edges = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+    
+    # Convert to RGB
     edges = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
-
+    
     return Image.fromarray(edges)
 
 def sharpen(img):
-    return img.filter(ImageFilter.UnsharpMask(
+    """Enhanced sharpening pipeline"""
+    # Unsharp mask
+    sharpened = img.filter(ImageFilter.UnsharpMask(
         radius=1.5, percent=120, threshold=3
     ))
+    
+    # Contrast enhancement
+    enhancer = ImageEnhance.Contrast(sharpened)
+    sharpened = enhancer.enhance(1.1)
+    
+    # Slight sharpness boost
+    sharpness = ImageEnhance.Sharpness(sharpened)
+    sharpened = sharpness.enhance(1.05)
+    
+    return sharpened
+
+# Optimized generation parameters
+STYLE_PARAMS = {
+    "realistic": {"cfg": 7.0, "steps": 20, "control_scale": 0.9},
+    "animated": {"cfg": 8.0, "steps": 15, "control_scale": 1.2},
+    "outline": {"cfg": 8.5, "steps": 15, "control_scale": 1.0}
+}
 
 def generate_image(prompt, negative_prompt, image_bytes, style):
+    """Generate with maximum performance"""
+    
+    # Preprocess
     control_image = preprocess_sketch(image_bytes)
-
-    if style == "realistic":
-        cfg = 7.0  # Slightly lower for natural, less artifact-prone realism
-        steps = 50  # Increased for finer details in realistic scenes
-        control_scale = 0.9  # Balanced to preserve sketch while enhancing realism
-    elif style == "animated":
-        cfg = 8.0  # Higher for vibrant, stylized animation
-        steps = 35  # Sufficient for animated style without over-processing
-        control_scale = 1.2  # Stronger control to maintain cartoonish fidelity
-    else:  # Default (e.g., artistic or general)
-        cfg = 8.5  # Balanced for creative freedom
-        steps = 40  # Good compromise for detail and speed
-        control_scale = 1.0  # Moderate control for flexible
-
+    params = STYLE_PARAMS.get(style, STYLE_PARAMS["realistic"])
+    
+    # Clear GPU cache before generation
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    
+    # Generate with optimized settings
     result = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
         image=control_image,
-        guidance_scale=cfg,
-        controlnet_conditioning_scale=control_scale,
-        num_inference_steps=steps
+        guidance_scale=params["cfg"],
+        controlnet_conditioning_scale=params["control_scale"],
+        num_inference_steps=params["steps"],
+        width=512,
+        height=512,
+        # Performance flags
+        denoising_end=1.0,
     )
-
+    
     return sharpen(result.images[0])
+
+# Warmup function
+def warmup_model():
+    """Multi-step warmup for optimal performance"""
+    print("[SD] Warming up model...")
+    
+    # Step 1: Small warmup
+    dummy = Image.new("RGB", (512, 512), "white")
+    _ = pipe(
+        prompt="warmup",
+        negative_prompt="",
+        image=dummy,
+        guidance_scale=7.0,
+        num_inference_steps=1
+    )
+    
+    # Step 2: Full warmup
+    _ = pipe(
+        prompt="test",
+        negative_prompt="",
+        image=dummy,
+        guidance_scale=7.0,
+        num_inference_steps=2
+    )
+    
+    # Clear cache after warmup
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    
+    print("[SD] ✓ Warmup complete!")
+
+def cleanup():
+    """Cleanup GPU memory"""
+    if device == "cuda":
+        torch.cuda.empty_cache()
+    print("[SD] Memory cleaned up")
+

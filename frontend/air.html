@@ -267,9 +267,15 @@ class ShapeDetector {
     
     const numCorners = corners.length;
     let targetAngle;
-    
+        if (numCorners === 0) targetAngle = 0; // Line
+
+    if60; // Triangle
+
     if (numCorners === 3) targetAngle = 60; // Triangle
     else if (numCorners === 4) targetAngle = 90; // Square/Rectangle
+        else if (numCorners === 5) targetAngle = 108; // Pentagon
+        else if (numCorners === 6) targetAngle = 120; // Hexagon
+
     else return corners;
     
     // Calculate center of shape

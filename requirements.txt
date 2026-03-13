@@ -11,3 +11,6 @@ Pillow
 fastapi
 uvicorn
 python-multipart
+bitsandbytes
+xformers
+scikit-image
