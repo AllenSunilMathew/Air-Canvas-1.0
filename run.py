@@ -10,7 +10,7 @@ BACKEND_DIR = os.path.join(PROJECT_DIR, "backend")
 # venv is outside backend
 VENV_PYTHON = os.path.join(PROJECT_DIR, "venv", "Scripts", "python.exe")
 
-HTML_AIR = os.path.join(PROJECT_DIR, "frontend", "air.html")
+# HTML_AIR = os.path.join(PROJECT_DIR, "frontend", "air.html")
 HTML_DRAW = os.path.join(PROJECT_DIR, "frontend", "draw.html")
 HTML_RES = os.path.join(PROJECT_DIR, "frontend", "result.html")
 
@@ -24,8 +24,8 @@ subprocess.Popen(
 time.sleep(3)
 
 # === Open frontend - air.html (camera/sketch), draw.html and result.html ===
-webbrowser.open(f"file:///{HTML_AIR}")
-time.sleep(1)
+# webbrowser.open(f"file:///{HTML_AIR}")
+# time.sleep(1)
 webbrowser.open(f"file:///{HTML_DRAW}")
 time.sleep(1)
 webbrowser.open(f"file:///{HTML_RES}")
