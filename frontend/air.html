@@ -20,13 +20,6 @@ body{
   align-items:center;
   justify-content:center;
   height:100vh;
-}
-
-.preloader {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
   height: 100%;
   background: linear-gradient(135deg, #f4f7ff, #eef2ff);
   display: flex;
@@ -68,34 +61,46 @@ body{
 }
 
 .workspace{
-  position:relative;
-  width:700px;
-  height:500px;
-  background:white;
-  border-radius:20px;
-  box-shadow:0 20px 60px rgba(0,0,0,.15);
-  display:flex;
-  align-items:center;
-  justify-content:center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: white;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 canvas{
   background:white;
-  border-radius:20px;
+  border-radius:0;
+  width:100%;
+  height:100%;
 }
 
 .videoBox{
   position:absolute;
+  position:fixed;
   width:180px;
   height:135px;
   top:20px;
   right:20px;
   border-radius:12px;
   overflow:hidden;
-  border:2px solid #ddd;
+  border:3px solid #6c8cff;
   cursor:grab;
-  box-shadow:0 10px 25px rgba(0,0,0,.2);
+  box-shadow:0 15px 40px rgba(0,0,0,0.3);
   background:#000;
+  transition:transform 0.1s ease;
+  z-index:10002;
+}
+
+.videoBox:active {
+  cursor:grabbing;
+  transform:scale(1.05);
 }
 
 #videoCanvas{
@@ -209,7 +214,7 @@ Line Straightening
 </label>
 
 <div class="instructions">
-🖐 Open palm = Start | ✌️ Clear | 🤟 Draw Page
+👆 Single Index Cursor | 🖐 Open palm = Start | ✌️ Clear | 🤟 Draw Page
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
@@ -494,29 +499,23 @@ currentStrokePoints=[]
 }
 
 function redraw(){
-
-ctx.clearRect(0,0,canvas.width,canvas.height)
-
-allStrokes.forEach(stroke=>{
-
-if(stroke.points.length<2) return
-
-ctx.beginPath()
-
-ctx.moveTo(stroke.points[0].x,stroke.points[0].y)
-
-for(let i=1;i<stroke.points.length;i++){
-ctx.lineTo(stroke.points[i].x,stroke.points[i].y)
-}
-
-ctx.strokeStyle=stroke.color
-ctx.lineWidth=5
-ctx.lineCap="round"
-ctx.lineJoin="round"
-ctx.stroke()
-
-})
-
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  
+  allStrokes.forEach(stroke=>{
+    if(stroke.points.length<2) return
+    ctx.beginPath()
+    ctx.moveTo(stroke.points[0].x,stroke.points[0].y)
+    for(let i=1;i<stroke.points.length;i++){
+      ctx.lineTo(stroke.points[i].x,stroke.points[i].y)
+    }
+    ctx.strokeStyle=stroke.color
+    ctx.lineWidth=5
+    ctx.lineCap="round"
+    ctx.lineJoin="round"
+    ctx.stroke()
+  })
 }
 
 // ==========================
@@ -528,10 +527,10 @@ locateFile:file=>"https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file
 })
 
 hands.setOptions({
-maxNumHands:1,
-modelComplexity:1,
-minDetectionConfidence:0.5,
-minTrackingConfidence:0.5
+maxNumHands: 1,
+modelComplexity: 1,
+minDetectionConfidence: 0.9,
+minTrackingConfidence: 0.9
 })
 
 let wasDrawing=false
@@ -623,10 +622,8 @@ videoCtx.clearRect(0,0,180,135)
 videoCtx.drawImage(results.image,0,0,180,135)
 
 // Check if hand landmarks exist and have the required points
-if(results.multiHandLandmarks && 
-   results.multiHandLandmarks.length > 0 && 
-   results.multiHandLandmarks[0] &&
-   results.multiHandLandmarks[0].length >= 21){
+if(results.multiHandLandmarks && results.multiHandLandmarks.length === 1 && 
+   results.multiHandLandmarks[0] && results.multiHandLandmarks[0].length >= 21){
 
 const lm=results.multiHandLandmarks[0]
 const gesture = detectGesture(lm);
@@ -671,12 +668,27 @@ const y=idx.y*canvas.height
 
 if(prevX!==null){
 
+// Live trace (faint preview line)
+ctx.save();
+ctx.globalAlpha = 0.3;
+ctx.strokeStyle=drawColor
+ctx.lineWidth=8;
+ctx.lineCap="round";
+ctx.lineJoin="round";
 ctx.beginPath()
 ctx.moveTo(prevX,prevY)
 ctx.lineTo(x,y)
+ctx.stroke();
+ctx.restore();
 
+// Commit stroke
 ctx.strokeStyle=drawColor
 ctx.lineWidth=5
+ctx.lineCap="round"
+ctx.lineJoin="round"
+ctx.beginPath()
+ctx.moveTo(prevX,prevY)
+ctx.lineTo(x,y)
 ctx.stroke()
 
 currentStrokePoints.push({x,y})
@@ -717,6 +729,30 @@ wasDrawing=true
   gestureHoldTime = 0;
   updateStatus('✋ Show Open Palm to Start', '#607d8b');
 }
+
+// Draw hand OVER strokes (no full clear)
+// ONE HAND ONLY - 21 MediaPipe points (strict)
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length === 1) {
+    const landmarks = results.multiHandLandmarks[0];
+    if (landmarks.length === 21) {
+      ctx.save();
+      
+      // Draw exactly 21 points
+      landmarks.forEach((landmark, index) => {
+        const x = (1 - landmark.x) * canvas.width;
+        const y = landmark.y * canvas.height;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#6c8cff';
+        ctx.fill();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+      
+      ctx.restore();
+    }
+  }
 
 })
 
@@ -866,20 +902,47 @@ window.addEventListener('load', async () => {
   await initCamera();
 });
 
+// Draggable videoBox
+let isDraggingVideo = false;
+let dragOffsetX = 0, dragOffsetY = 0;
+const videoBox = document.getElementById('videoBox');
+
+videoBox.addEventListener('mousedown', (e) => {
+  isDraggingVideo = true;
+  const rect = videoBox.getBoundingClientRect();
+  dragOffsetX = e.clientX - rect.left;
+  dragOffsetY = e.clientY - rect.top;
+  videoBox.style.transition = 'none';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDraggingVideo) return;
+  const x = e.clientX - dragOffsetX;
+  const y = e.clientY - dragOffsetY;
+  videoBox.style.left = x + 'px';
+  videoBox.style.top = y + 'px';
+  videoBox.style.right = 'auto';
+  videoBox.style.bottom = 'auto';
+});
+
+document.addEventListener('mouseup', () => {
+  isDraggingVideo = false;
+  videoBox.style.transition = 'transform 0.1s ease';
+});
+
 // Add debug info element
 const debugDiv = document.createElement('div');
 debugDiv.id = 'debugInfo';
 debugDiv.className = 'debug-info';
-debugDiv.textContent = 'Initializing...';
+debugDiv.textContent = 'Initializing... Single Cursor Air Canvas ✓ Drag video ✓ Smooth ✓';
 document.body.appendChild(debugDiv);
 
-// ==========================
-// TOGGLE
-// ==========================
-
+// Toggle
 document.getElementById("straightenToggle").addEventListener("change",e=>{
 lineStraighteningEnabled=e.target.checked
 })
+
+
 
 </script>
 
