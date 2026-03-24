@@ -732,6 +732,697 @@ wasDrawing=true
 
 // Draw hand OVER strokes (no full clear)
 // ONE HAND ONLY - 21 MediaPipe points (strict)
+  // Hand landmarks visualization removed to clear main canvas overlay
+  // Gestures and drawing preserved
+  // (Original code: drew 21 blue dots for hand tracking visualization)
+
+})
+
+// ==========================
+// CAMERA - Robust initialization with error handling
+// ==========================
+
+let camera = null;
+let isCameraStarted = false;
+
+// Debug function to update status
+function updateDebugInfo(msg) {
+  console.log('[Camera]', msg);
+  const debugEl = document.getElementById('debugInfo');
+  if (debugEl) {
+    debugEl.textContent = msg;
+  }
+}
+
+// Error display function
+function showError(message) {
+  // Remove existing error
+  const existing = document.querySelector('.error-message');
+  if (existing) existing.remove();
+  
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'error-message';
+  errorDiv.innerHTML = `
+    <h3>⚠️ Error</h3>
+    <p>${message}</p>
+    <button onclick="location.reload()" style="margin-top:10px;padding:8px 16px;cursor:pointer;">
+      Retry
+    </button>
+  `;
+  document.body.appendChild(errorDiv);
+}
+
+// Check if MediaPipe is loaded
+function checkMediaPipeLoaded() {
+  updateDebugInfo('Checking MediaPipe...');
+  
+  if (typeof Hands === 'undefined') {
+    showError('MediaPipe Hands not loaded. Check internet connection.');
+    return false;
+  }
+  if (typeof Camera === 'undefined') {
+    updateDebugInfo('Camera class not found, using fallback...');
+    return false;
+  }
+  return true;
+}
+
+// Initialize camera with fallback
+async function initCamera() {
+  updateDebugInfo('Initializing camera...');
+  
+  try {
+    // First check MediaPipe
+    if (!checkMediaPipeLoaded()) {
+      updateDebugInfo('Using fallback camera method...');
+      await initCameraFallback();
+      return;
+    }
+    
+    // Try MediaPipe Camera class
+    camera = new Camera(video, {
+      onFrame: async () => {
+        if (video.readyState === 4) {
+          await hands.send({ image: video });
+        }
+      },
+      width: 640,
+      height: 480
+    });
+    
+    await camera.start();
+    isCameraStarted = true;
+    updateDebugInfo('Camera started (MediaPipe)');
+    
+  } catch (error) {
+    console.error('Camera init error:', error);
+    updateDebugInfo('MediaPipe Camera failed, trying fallback...');
+    await initCameraFallback();
+  }
+}
+
+// Fallback camera initialization using getUserMedia directly
+async function initCameraFallback() {
+  updateDebugInfo('Requesting camera permission...');
+  
+  try {
+    // Request camera access directly
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        facingMode: 'user'
+      }
+    });
+    
+    video.srcObject = stream;
+    
+    await new Promise((resolve) => {
+      video.onloadedmetadata = () => {
+        video.play();
+        resolve();
+      };
+    });
+    
+    isCameraStarted = true;
+    updateDebugInfo('Camera started (Fallback)');
+    
+    // Start processing loop
+    processVideoFrame();
+    
+  } catch (error) {
+    console.error('Camera fallback error:', error);
+    showError(`Camera access denied: ${error.message}. Please allow camera access and try again.`);
+  }
+}
+
+// Process video frames (fallback method)
+async function processVideoFrame() {
+  if (!isCameraStarted || video.paused || video.ended) {
+    requestAnimationFrame(processVideoFrame);
+    return;
+  }
+  
+  try {
+    if (video.readyState === 4) {
+      await hands.send({ image: video });
+    }
+  } catch (e) {
+    console.error('Frame processing error:', e);
+  }
+  
+  requestAnimationFrame(processVideoFrame);
+}
+
+// Initialize on page load
+window.addEventListener('load', async () => {
+  updateDebugInfo('Page loaded, starting camera...');
+  
+  // Small delay to ensure MediaPipe scripts are loaded
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  await initCamera();
+});
+
+// Draggable videoBox
+let isDraggingVideo = false;
+let dragOffsetX = 0, dragOffsetY = 0;
+const videoBox = document.getElementById('videoBox');
+
+videoBox.addEventListener('mousedown', (e) => {
+  isDraggingVideo = true;
+  const rect = videoBox.getBoundingClientRect();
+  dragOffsetX = e.clientX - rect.left;
+  dragOffsetY = e.clientY - rect.top;
+  videoBox.style.transition = 'none';
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDraggingVideo) return;
+  const x = e.clientX - dragOffsetX;
+  const y = e.clientY - dragOffsetY;
+  videoBox.style.left = x + 'px';
+  videoBox.style.top = y + 'px';
+  videoBox.style.right = 'auto';
+  videoBox.style.bottom = 'auto';
+});
+
+document.addEventListener('mouseup', () => {
+  isDraggingVideo = false;
+  videoBox.style.transition = 'transform 0.1s ease';
+});
+
+// Add debug info element
+const debugDiv = document.createElement('div');
+debugDiv.id = 'debugInfo';
+debugDiv.className = 'debug-info';
+debugDiv.textContent = 'Initializing... Single Cursor Air Canvas ✓ Drag video ✓ Smooth ✓';
+document.body.appendChild(debugDiv);
+
+// Toggle
+document.getElementById("straightenToggle").addEventListener("change",e=>{
+lineStraighteningEnabled=e.target.checked
+})
+
+
+
+</script>
+
+</body>
+</html>    const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+    if (mag1 === 0 || mag2 === 0) return 0;
+    const cosAngle = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
+    return Math.acos(cosAngle) * 180 / Math.PI;
+  }
+  
+  // Detect corners in the stroke
+  detectCorners(points, threshold = 25) {
+    if (points.length < 5) return [points[0], points[points.length - 1]];
+    
+    const corners = [points[0]];
+    const window = 3;
+    
+    for (let i = window; i < points.length - window; i++) {
+      const prev = points[i - window];
+      const curr = points[i];
+      const next = points[i + window];
+      
+      const angle = this.getAngle(prev, curr, next);
+      if (angle < 180 - threshold || angle > 180 + threshold) {
+        corners.push(curr);
+      }
+    }
+    
+    corners.push(points[points.length - 1]);
+    return corners;
+  }
+  
+  // Correct angles to perfect geometric angles
+  correctToPerfectShape(corners) {
+    if (corners.length < 3) return corners;
+    
+    const numCorners = corners.length;
+    let targetAngle;
+        if (numCorners === 0) targetAngle = 0; // Line
+
+    if60; // Triangle
+
+    if (numCorners === 3) targetAngle = 60; // Triangle
+    else if (numCorners === 4) targetAngle = 90; // Square/Rectangle
+        else if (numCorners === 5) targetAngle = 108; // Pentagon
+        else if (numCorners === 6) targetAngle = 120; // Hexagon
+
+    else return corners;
+    
+    // Calculate center of shape
+    let cx = 0, cy = 0;
+    corners.forEach(p => { cx += p.x; cy += p.y; });
+    cx /= numCorners;
+    cy /= numCorners;
+    
+    // Sort corners by angle from center
+    const sorted = corners.map(p => ({
+      x: p.x,
+      y: p.y,
+      angle: Math.atan2(p.y - cy, p.x - cx)
+    })).sort((a, b) => a.angle - b.angle);
+    
+    // Calculate average radius
+    let avgRadius = 0;
+    sorted.forEach(p => {
+      avgRadius += Math.sqrt((p.x - cx) ** 2 + (p.y - cy) ** 2);
+    });
+    avgRadius /= numCorners;
+    
+    // Create corrected corners at perfect angles
+    const corrected = [];
+    for (let i = 0; i < numCorners; i++) {
+      const angle = (2 * Math.PI * i / numCorners) + sorted[0].angle;
+      corrected.push({
+        x: cx + avgRadius * Math.cos(angle),
+        y: cy + avgRadius * Math.sin(angle)
+      });
+    }
+    
+    return corrected;
+  }
+  
+  // Check if shape should be corrected (has valid number of corners)
+  shouldCorrect(corners) {
+    return corners.length === 3 || corners.length === 4;
+  }
+  
+  // Main function to detect and correct shape
+  process(points) {
+    const corners = this.detectCorners(points);
+    if (this.shouldCorrect(corners)) {
+      return this.correctToPerfectShape(corners);
+    }
+    return points;
+  }
+}
+
+class InkStrokeModeler{
+
+constructor(){
+// Lower epsilon = more aggressive straightening (1 = very straight, 10 = curved)
+this.epsilon=20
+// More segments = smoother straight lines
+this.segments=50
+// Enable shape detection and correction
+this.shapeDetector = new ShapeDetector()
+}
+
+distance(a,b){
+return Math.sqrt(
+(a.x-b.x)*(a.x-b.x)+
+(a.y-b.y)*(a.y-b.y))
+}
+
+perpendicularDistance(p,start,end){
+
+const dx=end.x-start.x
+const dy=end.y-start.y
+
+if(dx===0 && dy===0) return this.distance(p,start)
+
+const t=((p.x-start.x)*dx+(p.y-start.y)*dy)/(dx*dx+dy*dy)
+
+const projX=start.x+t*dx
+const projY=start.y+t*dy
+
+return this.distance(p,{x:projX,y:projY})
+}
+
+simplify(points){
+
+if(points.length<3) return points
+
+let maxDist=0
+let index=0
+const end=points.length-1
+
+for(let i=1;i<end;i++){
+
+const d=this.perpendicularDistance(points[i],points[0],points[end])
+
+if(d>maxDist){
+index=i
+maxDist=d
+}
+
+}
+
+if(maxDist>this.epsilon){
+
+const rec1=this.simplify(points.slice(0,index+1))
+const rec2=this.simplify(points.slice(index))
+
+return rec1.slice(0,-1).concat(rec2)
+
+}
+
+return [points[0],points[end]]
+}
+
+straightenStroke(points){
+
+const simplified=this.simplify(points)
+
+const newPoints=[]
+
+for(let i=0;i<simplified.length-1;i++){
+
+const start=simplified[i]
+const end=simplified[i+1]
+
+newPoints.push(start)
+
+const segments=this.segments
+
+for(let j=1;j<segments;j++){
+
+const t=j/segments
+
+newPoints.push({
+x:start.x+(end.x-start.x)*t,
+y:start.y+(end.y-start.y)*t
+})
+
+}
+
+}
+
+newPoints.push(simplified[simplified.length-1])
+
+return newPoints
+}
+
+}
+
+const inkModeler=new InkStrokeModeler()
+
+// ==========================
+// CANVAS SETUP
+// ==========================
+
+const video=document.getElementById("video")
+const canvas=document.getElementById("canvas")
+const ctx=canvas.getContext("2d")
+
+const videoCanvas=document.getElementById("videoCanvas")
+const videoCtx=videoCanvas.getContext("2d")
+
+const preloader=document.getElementById("preloader")
+
+let prevX=null
+let prevY=null
+let drawColor="black"
+
+let lineStraighteningEnabled=true
+
+function setColor(c){
+drawColor=c
+}
+
+function clearCanvas(){
+ctx.clearRect(0,0,canvas.width,canvas.height)
+allStrokes=[]
+currentStrokePoints=[]
+}
+
+// ==========================
+// STROKE PROCESSING
+// ==========================
+
+function processCompletedStroke(){
+
+if(!lineStraighteningEnabled || currentStrokePoints.length<3){
+
+if(currentStrokePoints.length>0){
+
+allStrokes.push({
+points:[...currentStrokePoints],
+color:currentStrokeColor
+})
+
+}
+
+currentStrokePoints=[]
+return
+
+}
+
+// First straighten the stroke
+let clean=inkModeler.straightenStroke(currentStrokePoints)
+
+// Then detect and correct shape angles (triangle=60°, square/rectangle=90°)
+clean = inkModeler.shapeDetector.process(clean)
+
+allStrokes.push({
+points:clean,
+color:currentStrokeColor
+})
+
+redraw()
+
+currentStrokePoints=[]
+}
+
+function redraw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  
+  allStrokes.forEach(stroke=>{
+    if(stroke.points.length<2) return
+    ctx.beginPath()
+    ctx.moveTo(stroke.points[0].x,stroke.points[0].y)
+    for(let i=1;i<stroke.points.length;i++){
+      ctx.lineTo(stroke.points[i].x,stroke.points[i].y)
+    }
+    ctx.strokeStyle=stroke.color
+    ctx.lineWidth=5
+    ctx.lineCap="round"
+    ctx.lineJoin="round"
+    ctx.stroke()
+  })
+}
+
+// ==========================
+// HAND TRACKING WITH GESTURE DETECTION
+// ==========================
+
+const hands=new Hands({
+locateFile:file=>"https://cdn.jsdelivr.net/npm/@mediapipe/hands/"+file
+})
+
+hands.setOptions({
+maxNumHands: 1,
+modelComplexity: 1,
+minDetectionConfidence: 0.9,
+minTrackingConfidence: 0.9
+})
+
+let wasDrawing=false
+let isDrawingMode=false // Drawing mode - starts with open palm gesture
+let gestureHoldTime=0 // Time to hold gesture for confirmation
+const GESTURE_HOLD_FRAMES=15 // Frames to hold gesture before action
+
+// Function to check if a finger is extended
+// Returns true if the fingertip is extended beyond the pip joint
+function isFingerExtended(lm, tipIdx, pipIdx, wristIdx) {
+  const tip = lm[tipIdx];
+  const pip = lm[pipIdx];
+  const wrist = lm[wristIdx];
+  
+  if (!tip || !pip || !wrist) return false;
+  
+  // Get the direction from wrist to pip
+  const wristToPipX = pip.x - wrist.x;
+  const wristToPipY = pip.y - wrist.y;
+  const wristToPipLen = Math.sqrt(wristToPipX * wristToPipX + wristToPipY * wristToPipY);
+  
+  // Get the direction from wrist to tip
+  const wristToTipX = tip.x - wrist.x;
+  const wristToTipY = tip.y - wrist.y;
+  const wristToTipLen = Math.sqrt(wristToTipX * wristToTipX + wristToTipY * wristToTipY);
+  
+  // Finger is extended if tip is further from wrist than pip
+  return wristToTipLen > wristToPipLen * 1.1;
+}
+
+// Function to detect hand gesture
+function detectGesture(lm) {
+  // MediaPipe landmark indices:
+  // 4: Thumb tip, 3: Thumb pip
+  // 8: Index tip, 6: Index pip  
+  // 12: Middle tip, 10: Middle pip
+  // 16: Ring tip, 14: Ring pip
+  // 20: Pinky tip, 18: Pinky pip
+  // 0: Wrist
+  
+  const thumbExtended = isFingerExtended(lm, 4, 3, 0);
+  const indexExtended = isFingerExtended(lm, 8, 6, 0);
+  const middleExtended = isFingerExtended(lm, 12, 10, 0);
+  const ringExtended = isFingerExtended(lm, 16, 14, 0);
+  const pinkyExtended = isFingerExtended(lm, 20, 18, 0);
+  
+  const extendedCount = [thumbExtended, indexExtended, middleExtended, ringExtended, pinkyExtended].filter(Boolean).length;
+  
+  // Open palm: 4 or more fingers extended
+  if (extendedCount >= 4) {
+    return 'open_palm';
+  }
+  
+  // Three fingers: index, middle, ring extended (for going back to draw.html)
+  if (indexExtended && middleExtended && ringExtended && !pinkyExtended) {
+    return 'three_fingers';
+  }
+  
+  // Two fingers (peace sign): index and middle extended
+  if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
+    return 'two_fingers';
+  }
+  
+  // Index finger only: index extended, others folded
+  if (indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
+    return 'index_finger';
+  }
+  
+  return 'other';
+}
+
+// Add status indicator for drawing mode
+const statusDiv = document.createElement('div');
+statusDiv.id = 'statusIndicator';
+statusDiv.style.cssText = 'position:fixed;top:10px;left:10px;background:rgba(0,0,0,0.7);color:#fff;padding:8px 12px;border-radius:5px;font-size:14px;z-index:9999;';
+statusDiv.textContent = '✋ Show Open Palm to Start';
+document.body.appendChild(statusDiv);
+
+function updateStatus(text, color) {
+  statusDiv.textContent = text;
+  statusDiv.style.background = color || 'rgba(0,0,0,0.7)';
+}
+
+hands.onResults(function(results){
+
+if(preloader) preloader.classList.add("hidden")
+
+videoCtx.clearRect(0,0,180,135)
+videoCtx.drawImage(results.image,0,0,180,135)
+
+// Check if hand landmarks exist and have the required points
+if(results.multiHandLandmarks && results.multiHandLandmarks.length === 1 && 
+   results.multiHandLandmarks[0] && results.multiHandLandmarks[0].length >= 21){
+
+const lm=results.multiHandLandmarks[0]
+const gesture = detectGesture(lm);
+
+// Handle gesture detection with hold time
+if (gesture === 'open_palm') {
+  gestureHoldTime++;
+  if (gestureHoldTime >= GESTURE_HOLD_FRAMES && !isDrawingMode) {
+    isDrawingMode = true;
+    updateStatus('✏️ Drawing Mode - Use Index Finger', '#4CAF50');
+    gestureHoldTime = 0;
+  }
+} else if (gesture === 'two_fingers') {
+  // Two fingers = clear canvas
+  gestureHoldTime++;
+  if (gestureHoldTime >= GESTURE_HOLD_FRAMES) {
+    clearCanvas();
+    updateStatus('🗑️ Canvas Cleared', '#ff9800');
+    gestureHoldTime = 0;
+  }
+} else if (gesture === 'three_fingers') {
+  // Three fingers = go back to draw.html
+  gestureHoldTime++;
+  if (gestureHoldTime >= GESTURE_HOLD_FRAMES) {
+    window.location.href = 'draw.html';
+    gestureHoldTime = 0;
+  }
+} else {
+  gestureHoldTime = 0;
+}
+
+// Only draw if in drawing mode AND index finger is detected
+if (isDrawingMode && gesture === 'index_finger') {
+
+const idx=lm[8]
+const pip=lm[6]
+
+if(idx && pip) {
+
+const x=(1-idx.x)*canvas.width
+const y=idx.y*canvas.height
+
+if(prevX!==null){
+
+// Live trace (faint preview line)
+ctx.save();
+ctx.globalAlpha = 0.3;
+ctx.strokeStyle=drawColor
+ctx.lineWidth=8;
+ctx.lineCap="round";
+ctx.lineJoin="round";
+ctx.beginPath()
+ctx.moveTo(prevX,prevY)
+ctx.lineTo(x,y)
+ctx.stroke();
+ctx.restore();
+
+// Commit stroke
+ctx.strokeStyle=drawColor
+ctx.lineWidth=5
+ctx.lineCap="round"
+ctx.lineJoin="round"
+ctx.beginPath()
+ctx.moveTo(prevX,prevY)
+ctx.lineTo(x,y)
+ctx.stroke()
+
+currentStrokePoints.push({x,y})
+currentStrokeColor=drawColor
+
+}else{
+
+currentStrokePoints=[{x,y}]
+currentStrokeColor=drawColor
+
+}
+
+prevX=x
+prevY=y
+wasDrawing=true
+
+}
+
+} else {
+  // Index finger not extended - stop drawing
+  if (wasDrawing) {
+    processCompletedStroke();
+    wasDrawing = false;
+  }
+  prevX = null;
+  prevY = null;
+}
+
+} else {
+  // No hand detected
+  if (wasDrawing) {
+    processCompletedStroke();
+    wasDrawing = false;
+  }
+  isDrawingMode = false;
+  prevX = null;
+  prevY = null;
+  gestureHoldTime = 0;
+  updateStatus('✋ Show Open Palm to Start', '#607d8b');
+}
+
+// Draw hand OVER strokes (no full clear)
+// ONE HAND ONLY - 21 MediaPipe points (strict)
   if (results.multiHandLandmarks && results.multiHandLandmarks.length === 1) {
     const landmarks = results.multiHandLandmarks[0];
     if (landmarks.length === 21) {
