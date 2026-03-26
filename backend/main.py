@@ -19,6 +19,7 @@ from vision_prompt import sketch_to_prompt, clear_cache
 from color_analyzer import extract_dominant_colors
 from prompt_enhancer import enhance_prompt
 from sd15_utils import generate_image, warmup_model, device as sd_device, cleanup as sd_cleanup
+    from shape_processor import detect_and_straighten_shapes, strokes_to_3d
 
 app = FastAPI(title="Sketch-to-Image API (Optimized)")
 
@@ -47,37 +48,62 @@ _request_queue = PriorityQueue(maxsize=5)
 _processing_lock = threading.Lock()
 
 def process_request(image_bytes: bytes, style: str) -> dict:
-    """Process generation request with GPU lock"""
-    with _processing_lock:
-        # Check cache
-        cache_key = _get_cache_key(image_bytes, style)
-        if cache_key in _response_cache:
-            result = _response_cache[cache_key].copy()
-            result["cached"] = True
-            return result
-        
-        # Process pipeline
-        caption = sketch_to_prompt(image_bytes)
-        colors = extract_dominant_colors(image_bytes)
-        prompt, negative_prompt = enhance_prompt(caption, colors, style)
-        
-        output_image = generate_image(prompt, negative_prompt, image_bytes, style)
-        
-        # Convert to result
-        buffer = io.BytesIO()
-        output_image.save(buffer, format="PNG")
-        buffer.seek(0)
-        
-        result = {
-            "image": base64.b64encode(buffer.getvalue()).decode(),
-            "caption": caption,
-            "colors": colors,
-            "cached": False
-        }
-        
-        # Cache result
-        if len(_response_cache) >= MAX_CACHE_SIZE:
-            # Remove oldest
+    """Process image generation request with caching"""
+    cache_key = _get_cache_key(image_bytes, style)
+    
+    # Check cache first
+    if cache_key in _response_cache:
+        result = _response_cache[cache_key].copy()
+        result["cached"] = True
+        return result
+    
+    print("[API] Processing new request...")
+    
+    # Process pipeline - STRAIGHTEN + 3D INFLATE
+    caption = sketch_to_prompt(image_bytes)
+    
+    # Straighten shapes after BLIP (handle missing module gracefully)
+    try:
+        from shape_processor import detect_and_straighten_shapes
+        shapes = detect_and_straighten_shapes(image_bytes)
+        straightened_bytes = base64.b64decode(shapes["straightened_sketch_b64"])
+        straightened_b64 = shapes["straightened_sketch_b64"]
+    except ImportError:
+        print("[API] shape_processor not available, using original")
+        straightened_bytes = image_bytes
+        straightened_b64 = base64.b64encode(image_bytes).decode()
+    
+    # Inflate to 3D (handle missing module)
+    depth_b64 = ""
+    
+    colors = extract_dominant_colors(image_bytes)
+    threed_caption = f"3D extruded realistic {caption}, volumetric depth, solid object"
+    prompt, negative_prompt = enhance_prompt(threed_caption, colors, style)
+    
+    output_image = generate_image(prompt, negative_prompt, straightened_bytes, style)
+    
+    # Convert to result
+    buffer = io.BytesIO()
+    output_image.save(buffer, format="PNG")
+    buffer.seek(0)
+    
+    result = {
+        "image": base64.b64encode(buffer.getvalue()).decode(),
+        "caption": caption,
+        "threed_caption": threed_caption,
+        "colors": colors,
+        "straightened_sketch": straightened_b64,
+        "depth_map": depth_b64,
+        "cached": False
+    }
+    
+    # Cache result
+    if len(_response_cache) >= MAX_CACHE_SIZE:
+        _response_cache.pop(next(iter(_response_cache)))
+    _response_cache[cache_key] = result
+    
+    gc.collect()
+    return result
             _response_cache.pop(next(iter(_response_cache)))
         _response_cache[cache_key] = result
         
@@ -85,9 +111,6 @@ def process_request(image_bytes: bytes, style: str) -> dict:
         gc.collect()
         
         return result
-
-# ==================== STARTUP ====================
-@app.on_event("startup")
 async def startup_event():
     print("\n" + "="*60)
     print("🚀 Sketch-to-Image API v2.0 (FULLY OPTIMIZED)")
@@ -246,7 +269,27 @@ def health_check():
 
 
 # Add async ping for keeping connection alive
+@app.post("/preview_inflate")
+async def preview_inflate(image: UploadFile = File(...)):
+    """Preview 3D inflate (depth map) after straightening - fast response"""
+    image_bytes = await image.read()
+    maps = inflate_shapes(image_bytes)
+    return {
+        "depth_b64": maps["depth_b64"],
+        "straightened_sketch_b64": maps["straightened_sketch_b64"]
+    }
+
+
 @app.get("/ping")
 def ping():
-    return {"ping": "pong"}
+    return "OK"
 
+@app.post("/to3d")
+async def to3d_endpoint(strokes: str = Form(...)):
+    """Air.html strokes → 3D GLTF"""
+    try:
+        result = strokes_to_3d(strokes)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+    
