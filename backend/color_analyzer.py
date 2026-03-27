@@ -6,29 +6,20 @@ warnings.filterwarnings("ignore")
 
 def extract_dominant_colors(image_bytes: bytes, num_colors: int = 5):
     """
-    Enhanced color extraction with better accuracy and performance.
-    Uses K-means clustering with optimized parameters.
+    Optimized color extraction using unified preprocess for speed.
     """
-    # Decode image
-    np_img = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
+    from preprocess import preprocess_image
+    preprocessed = preprocess_image(image_bytes)
+    img_rgb = np.array(preprocessed.resized_rgb_256)
     
-    if img is None or img.size == 0:
+    if img_rgb.size == 0:
         return []
     
-    # Resize for faster processing (150x150 is sufficient for color analysis)
-    img = cv2.resize(img, (150, 150), interpolation=cv2.INTER_AREA)
-    
-    # Convert to RGB (OpenCV uses BGR)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    
-    # Reshape to pixel array
     pixels = img_rgb.reshape(-1, 3).astype(np.float32)
     
-    # Use K-means++ for better initial centroid selection
     criteria = (
         cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 
-        20,  # Increased iterations for better convergence
+        10,
         1.0
     )
     
@@ -37,27 +28,23 @@ def extract_dominant_colors(image_bytes: bytes, num_colors: int = 5):
         num_colors,
         None,
         criteria,
-        10,
-        cv2.KMEANS_PP_CENTERS  # Better initialization
+        5,
+        cv2.KMEANS_PP_CENTERS
     )
     
-    # Convert centers to color names
     colors = []
     for r, g, b in centers:
         color_name = _rgb_to_color_name(int(r), int(g), int(b))
-        if color_name:
+        if color_name and color_name not in ['gray', 'neutral']:
             colors.append(color_name)
     
-    # Return most common colors (deduplicated)
-    return list(dict.fromkeys(colors))[:3]  # Top 3 unique colors
-
+    return colors[:3]
 
 def _rgb_to_color_name(r: int, g: int, b: int) -> str:
     """
     Convert RGB values to color name with improved accuracy.
     Uses HSV color space for better color classification.
     """
-    # Convert to HSV for better color detection
     hsv = cv2.cvtColor(
         np.uint8([[[r, g, b]]]), 
         cv2.COLOR_RGB2HSV
@@ -65,7 +52,6 @@ def _rgb_to_color_name(r: int, g: int, b: int) -> str:
     
     h, s, v = hsv
     
-    # Check for grayscale (low saturation)
     if s < 15 or v < 20:
         if v > 200:
             return "white"
@@ -73,7 +59,6 @@ def _rgb_to_color_name(r: int, g: int, b: int) -> str:
             return "black"
         return "gray"
     
-    # Check for low saturation (pastel tones)
     if s < 40:
         if v > 180:
             return "light"
@@ -81,32 +66,28 @@ def _rgb_to_color_name(r: int, g: int, b: int) -> str:
             return "dark"
         return "neutral"
     
-    # Determine hue-based colors
-    # OpenCV hue range is 0-180 (half of 0-360)
-    if h < 15 or h > 165:  # Red (wraps around)
+    if h < 15 or h > 165:
         if s > 150 and v > 100:
             return "red"
-    elif 15 <= h < 35:     # Orange/Yellow
+    elif 15 <= h < 35:
         if s > 100:
             return "orange"
         return "yellow"
-    elif 35 <= h < 70:     # Green
+    elif 35 <= h < 70:
         if s > 100:
             return "green"
-    elif 70 <= h < 100:    # Cyan
+    elif 70 <= h < 100:
         return "cyan"
-    elif 100 <= h < 130:   # Blue
+    elif 100 <= h < 130:
         return "blue"
-    elif 130 <= h < 165:   # Purple/Magenta
+    elif 130 <= h < 165:
         return "purple"
     
     return "colorful"
 
-
 def extract_colors_simple(image_bytes: bytes) -> list:
     """
-    Simple fallback color extraction using histogram analysis.
-    Faster but less accurate than K-means approach.
+    Simple fallback color extraction.
     """
     np_img = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
@@ -114,10 +95,7 @@ def extract_colors_simple(image_bytes: bytes) -> list:
     if img is None or img.size == 0:
         return []
     
-    # Resize
     img = cv2.resize(img, (100, 100))
-    
-    # Calculate average color
     avg_color = np.mean(img, axis=(0, 1))
     r, g, b = int(avg_color[2]), int(avg_color[1]), int(avg_color[0])
     

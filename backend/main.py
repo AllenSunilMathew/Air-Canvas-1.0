@@ -15,11 +15,12 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Import optimized modules
+from preprocess import preprocess_image
 from vision_prompt import sketch_to_prompt, clear_cache
 from color_analyzer import extract_dominant_colors
 from prompt_enhancer import enhance_prompt
 from sd15_utils import generate_image, warmup_model, device as sd_device, cleanup as sd_cleanup
-    from shape_processor import detect_and_straighten_shapes, strokes_to_3d
+from shape_processor import detect_and_straighten_shapes, strokes_to_3d
 
 app = FastAPI(title="Sketch-to-Image API (Optimized)")
 
@@ -47,62 +48,75 @@ def _get_cache_key(image_bytes: bytes, style: str) -> str:
 _request_queue = PriorityQueue(maxsize=5)
 _processing_lock = threading.Lock()
 
-def process_request(image_bytes: bytes, style: str) -> dict:
-    """Process image generation request with caching"""
+async def process_request_async(image_bytes: bytes, style: str) -> dict:
+    \"\"\"Optimized async pipeline with unified preprocess and torch contexts.\"\"\"
     cache_key = _get_cache_key(image_bytes, style)
     
     # Check cache first
     if cache_key in _response_cache:
         result = _response_cache[cache_key].copy()
-        result["cached"] = True
+        result[\"cached\"] = True
         return result
     
-    print("[API] Processing new request...")
+    print(\"[API] Processing new request (optimized pipeline)...\")
+
+    # Unified preprocess ONCE
+    preprocessed = preprocess_image(image_bytes)
     
-    # Process pipeline - STRAIGHTEN + 3D INFLATE
-    caption = sketch_to_prompt(image_bytes)
+    import torch
     
-    # Straighten shapes after BLIP (handle missing module gracefully)
-    try:
-        from shape_processor import detect_and_straighten_shapes
-        shapes = detect_and_straighten_shapes(image_bytes)
-        straightened_bytes = base64.b64decode(shapes["straightened_sketch_b64"])
-        straightened_b64 = shapes["straightened_sketch_b64"]
-    except ImportError:
-        print("[API] shape_processor not available, using original")
-        straightened_bytes = image_bytes
-        straightened_b64 = base64.b64encode(image_bytes).decode()
+    # Parallel BLIP + Colors (non-blocking)
+    caption_task = asyncio.to_thread(sketch_to_prompt, image_bytes)
+    colors_task = asyncio.to_thread(extract_dominant_colors, image_bytes)
+    caption, colors = await asyncio.gather(caption_task, colors_task)
     
-    # Inflate to 3D (handle missing module)
-    depth_b64 = ""
-    
-    colors = extract_dominant_colors(image_bytes)
-    threed_caption = f"3D extruded realistic {caption}, volumetric depth, solid object"
+    # Enhance prompt
+    threed_caption = f\"3D extruded realistic {caption}, volumetric depth, solid object\"
     prompt, negative_prompt = enhance_prompt(threed_caption, colors, style)
     
-    output_image = generate_image(prompt, negative_prompt, straightened_bytes, style)
+    # Straighten shapes
+    try:
+        shapes = detect_and_straighten_shapes(image_bytes)
+        straightened_bytes = base64.b64decode(shapes[\"straightened_sketch_b64\"])
+        straightened_b64 = shapes[\"straightened_sketch_b64\"]
+    except:
+        print(\"[API] shape_processor unavailable, using preprocessed sketch\")
+        straightened_bytes = preprocessed.to_bytes()
+        straightened_b64 = base64.b64encode(straightened_bytes).decode()
     
-    # Convert to result
+    depth_b64 = \"\"  # TODO Phase 2
+    
+    # Generate with inference optimizations
+    with torch.inference_mode(), torch.no_grad():
+        output_image = generate_image(prompt, negative_prompt, straightened_bytes, style)
+    
+    # Convert result
     buffer = io.BytesIO()
-    output_image.save(buffer, format="PNG")
+    output_image.save(buffer, format=\"PNG\", optimize=True)
     buffer.seek(0)
     
     result = {
-        "image": base64.b64encode(buffer.getvalue()).decode(),
-        "caption": caption,
-        "threed_caption": threed_caption,
-        "colors": colors,
-        "straightened_sketch": straightened_b64,
-        "depth_map": depth_b64,
-        "cached": False
+        \"image\": base64.b64encode(buffer.getvalue()).decode(),
+        \"caption\": caption,
+        \"threed_caption\": threed_caption,
+        \"colors\": colors,
+        \"straightened_sketch\": straightened_b64,
+        \"depth_map\": depth_b64,
+        \"preprocessed\": True,
+        \"cached\": False
     }
     
-    # Cache result
+    # Smart cache (LRU-like: evict oldest)
     if len(_response_cache) >= MAX_CACHE_SIZE:
-        _response_cache.pop(next(iter(_response_cache)))
+        oldest_key = min(_response_cache, key=_response_cache.get)  # Simple LRU approx
+        del _response_cache[oldest_key]
     _response_cache[cache_key] = result
     
+    # Aggressive cleanup
+    if hasattr(torch, 'cuda'):
+        torch.cuda.empty_cache()
     gc.collect()
+    
     return result
             _response_cache.pop(next(iter(_response_cache)))
         _response_cache[cache_key] = result
@@ -148,25 +162,27 @@ async def generate(
     image: UploadFile = File(...),
     style: str = Form("realistic")
 ):
-    """Optimized generation endpoint"""
-    start_time = time.time()
+    \"\"\"Ultra-optimized async generation endpoint.\"\"\"
+    start_time = time.perf_counter()
     image_bytes = await image.read()
     
     try:
-        result = process_request(image_bytes, style)
+        result = await process_request_async(image_bytes, style)
         
-        elapsed = time.time() - start_time
-        result["timing"] = {
-            "total": round(elapsed, 2),
-            "cached": result.pop("cached", False)
+        elapsed = time.perf_counter() - start_time
+        result[\"timing\"] = {
+            \"total\": round(elapsed, 3),
+            \"preprocessed\": True,
+            \"cached\": result.pop(\"cached\", False)
         }
         
-        print(f"⏱️  Total: {elapsed:.2f}s" + (" (cached)" if result["timing"]["cached"] else ""))
+        print(f\"⏱️  Optimized: {elapsed:.3f}s\" + (\" (cached)\" if result[\"timing\"][\"cached\"] else \"\"))
         return result
         
     except Exception as e:
-        print(f"❌ Error: {e}")
-        return {"error": str(e)}, 500
+        import traceback
+        print(f\"❌ Error: {e}\\\\n{traceback.format_exc()}\")
+        return {\"error\": str(e)}, 500
 
 
 @app.post("/generate/progress")
@@ -269,6 +285,13 @@ def health_check():
 
 
 # Add async ping for keeping connection alive
+@app.post("/to3d")
+async def to3d(strokes: str = Form(...)):
+    """Air canvas strokes → 3D GLTF model"""
+    from shape_processor import strokes_to_3d
+    result = strokes_to_3d(strokes)
+    return result
+
 @app.post("/preview_inflate")
 async def preview_inflate(image: UploadFile = File(...)):
     """Preview 3D inflate (depth map) after straightening - fast response"""
@@ -279,17 +302,9 @@ async def preview_inflate(image: UploadFile = File(...)):
         "straightened_sketch_b64": maps["straightened_sketch_b64"]
     }
 
-
 @app.get("/ping")
 def ping():
     return "OK"
 
-@app.post("/to3d")
-async def to3d_endpoint(strokes: str = Form(...)):
-    """Air.html strokes → 3D GLTF"""
-    try:
-        result = strokes_to_3d(strokes)
-        return result
-    except Exception as e:
-        return {"error": str(e)}
+
     

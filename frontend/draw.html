@@ -278,7 +278,11 @@ const canvas=document.getElementById("canvas");
 const ctx=canvas.getContext("2d");
 let drawing=false,lastX=0,lastY=0,mode="brush";
 
-ctx.lineCap="round";ctx.strokeStyle="black";
+let sparkleTime = 0;
+let sparkleEnabled = true;
+
+ctx.lineCap="round";ctx.strokeStyle="#4fc3e7";
+ctx.lineJoin = "round";
 
 canvas.onpointerdown=e=>{
  drawing=true;
@@ -288,6 +292,15 @@ canvas.onpointerdown=e=>{
 };
 
 canvas.onpointerup=()=>drawing=false;
+function updateSparkleColor() {
+  const time = sparkleTime;
+  const hue = (200 + Math.sin(time) * 30 + 360) % 360;
+  const s = 60 + Math.sin(time * 1.3) * 40;
+  const l = 75 + Math.sin(time * 0.7) * 20;
+  sparkleTime += 0.15;
+  return `hsl(${Math.round(hue)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
+}
+
 canvas.onpointermove=e=>{
  if(!drawing)return;
  const r=canvas.getBoundingClientRect();
@@ -295,6 +308,9 @@ canvas.onpointermove=e=>{
  const y=(e.clientY-r.top)*(canvas.height/r.height);
  ctx.lineWidth=size.value;
  ctx.globalCompositeOperation=mode==="eraser"?"destination-out":"source-over";
+ if (mode !== "eraser" && sparkleEnabled) {
+   ctx.strokeStyle = updateSparkleColor();
+ } 
  ctx.beginPath();ctx.moveTo(lastX,lastY);ctx.lineTo(x,y);ctx.stroke();
  lastX=x;lastY=y;
 };

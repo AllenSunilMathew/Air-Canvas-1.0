@@ -10,11 +10,18 @@ class DrawingCanvas {
     this.height = height;
     this.app = null;
     this.graphics = null;
-    this.currentColor = '#000000';
+    this.currentColor = '#4fc3f7'; // Base for sparkling blue effect
     this.brushSize = 5;
     this.isEraser = false;
     this.previousPoint = null;
     this.isDrawing = false;
+    
+    // Sparkling properties
+    this.sparkleEnabled = true;
+    this.sparkleTime = 0;
+    this.sparkleIntensity = 0.8;
+    
+
     
     // Smoothing
     this.smoothFactor = 0.5;
@@ -54,9 +61,15 @@ class DrawingCanvas {
     this.eraserGraphics.blendMode = PIXI.BLEND_MODES.ERASE;
     this.app.stage.addChild(this.eraserGraphics);
     
+    // Sparkle animation ticker
+    this.app.ticker.add((delta) => {
+      this.sparkleTime += 0.1 * delta;
+    });
+    
     console.log('DrawingCanvas initialized with PixiJS');
     return this.app;
   }
+
 
   /**
    * Load PixiJS library dynamically
@@ -150,7 +163,7 @@ class DrawingCanvas {
     
     targetGraphics.lineStyle({
       width: this.brushSize,
-      color: this.isEraser ? 0xFFFFFF : this.parseColor(this.currentColor),
+      color: this.isEraser ? 0xFFFFFF : this.getSparkleColor(),
       alpha: 1,
       cap: PIXI.LINE_CAP.ROUND,
       join: PIXI.LINE_JOIN.ROUND,
@@ -181,6 +194,42 @@ class DrawingCanvas {
     }
     
     return 0x000000;
+  }
+
+  /**
+   * Get current color for drawing (sparkle if enabled)
+   */
+  getSparkleColor() {
+    if (!this.sparkleEnabled) {
+      return this.parseColor(this.currentColor);
+    }
+    this.updateSparkleColor();
+    return this.parseColor(this.currentColor);
+  }
+
+  /**
+   * Update sparkling color animation
+   */
+  updateSparkleColor() {
+    const time = this.sparkleTime;
+    const hue = (200 + Math.sin(time) * 20 + 360) % 360;
+    const s = 0.7 + Math.sin(time * 1.3) * 0.25;
+    const l = 0.8 + Math.sin(time * 0.7) * 0.12;
+    // HSL to RGB conversion
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs((hue / 60) % 2 - 1));
+    const m = l - c/2;
+    let r=0, g=0, b=0;
+    if (hue < 60) {r = c; g = x; b = 0;}
+    else if (hue < 120) {r = x; g = c; b = 0;}
+    else if (hue < 180) {r = 0; g = c; b = x;}
+    else if (hue < 240) {r = 0; g = x; b = c;}
+    else if (hue < 300) {r = x; g = 0; b = c;}
+    else {r = c; g = 0; b = x;}
+    r = Math.round((r + m) * 255);
+    g = Math.round((g + m) * 255);
+    b = Math.round((b + m) * 255);
+    this.currentColor = `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
   }
 
   /**

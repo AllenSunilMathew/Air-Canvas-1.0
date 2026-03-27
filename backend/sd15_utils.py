@@ -81,13 +81,17 @@ if device == "cuda":
         pipe.enable_model_cpu_offload()
         print("[SD] ✓ Model CPU offload enabled")
 
-# 7. torch.compile for JIT optimization (PyTorch 2.0+)
-if hasattr(torch, 'compile'):
+# 7. torch.compile with fallback
+try:
+    pipe.unet = torch.compile(pipe.unet, mode="reduce-overhead")
+    pipe.vae = torch.compile(pipe.vae, mode="reduce-overhead")
+    print("[SD] ✓ torch.compile (UNET + VAE)")
+except Exception as e:
     try:
-        pipe = torch.compile(pipe, mode="reduce-overhead", fullgraph=True)
-        print("[SD] ✓ torch.compile enabled")
-    except Exception as e:
-        print(f"[SD] ✗ torch.compile skipped: {e}")
+        pipe = torch.compile(pipe, mode="default")
+        print("[SD] ✓ torch.compile (full pipeline fallback)")
+    except Exception as e2:
+        print(f"[SD] - torch.compile skipped: {e2}")
 
 # 8. Set optimal performance defaults
 pipe.set_progress_bar_config(disable=True)  # Disable progress bar for speed
@@ -146,29 +150,36 @@ STYLE_PARAMS = {
 }
 
 def generate_image(prompt, negative_prompt, image_bytes, style):
-    """Generate with maximum performance"""
-    
-    # Preprocess
-    control_image = preprocess_sketch(image_bytes)
+    \"\"\"Generate with preprocess integration & dynamic denoising.\"\"\"
+    from preprocess import preprocess_image
+    preprocessed = preprocess_image(image_bytes)
+    control_image = preprocessed.controlnet_sketch
     params = STYLE_PARAMS.get(style, STYLE_PARAMS["realistic"])
+    
+    # Dynamic denoising based on image complexity (edge density)
+    gray = np.array(control_image.convert('L'))
+    edges = cv2.Canny(gray, 50, 150)
+    edge_density = np.mean(edges > 0) / 255
+    denoising_strength = max(0.75, min(0.95, 0.85 + edge_density * 0.1))
     
     # Clear GPU cache before generation
     if device == "cuda":
         torch.cuda.empty_cache()
     
     # Generate with optimized settings
-    result = pipe(
-        prompt=prompt,
-        negative_prompt=negative_prompt,
-        image=control_image,
-        guidance_scale=params["cfg"],
-        controlnet_conditioning_scale=params["control_scale"],
-        num_inference_steps=params["steps"],
-        width=512,
-        height=512,
-        # Performance flags
-        denoising_end=1.0,
-    )
+    with torch.inference_mode():
+        result = pipe(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            image=control_image,
+            guidance_scale=params["cfg"],
+            controlnet_conditioning_scale=params["control_scale"],
+            num_inference_steps=params["steps"],
+            width=512,
+            height=512,
+            strength=denoising_strength,
+            denoising_end=0.95,
+        )
     
     return sharpen(result.images[0])
 

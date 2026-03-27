@@ -85,71 +85,55 @@ def _get_image_features(image_bytes: bytes) -> str:
     return hashlib.md5(small.tobytes()).hexdigest()[:12]
 
 def sketch_to_prompt(image_bytes: bytes) -> str:
-    """Optimized caption generation with smart caching"""
     
-    # Quick hash for exact match
+    
     img_hash = _get_image_hash(image_bytes)
     
-    # Check exact cache
     if img_hash in _caption_cache:
-        print(f"[BLIP] ✓ Cache hit (exact)")
+    def clear_cache():
         return _caption_cache[img_hash]
     
-    # Check feature cache for similar images
     feature_hash = _get_image_features(image_bytes)
     if feature_hash in _feature_cache:
-        print(f"[BLIP] ✓ Cache hit (similar)")
+        """Clear all caches"""
         return _feature_cache[feature_hash]
     
-    # Load and process image
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    # Use unified preprocess - fixed 224x224 for BLIP efficiency
+    from preprocess import preprocess_image
+    preprocessed = preprocess_image(image_bytes)
+    image = preprocessed.resized_rgb_256.convert('RGB')
     
-    # Prepare inputs with optimization
-    inputs = processor(
-        image, 
-        return_tensors="pt",
-        size={"shortest_edge": 256}
-    ).to(device)
+    inputs = processor(image, return_tensors="pt").to(device)
     
-    # Generate with optimized settings
     with torch.no_grad():
         out = model.generate(
             **inputs,
-            max_new_tokens=20,
-            num_beams=2,
-            repetition_penalty=1.1,
-            length_penalty=0.8,
-            early_stopping=True
+            max_new_tokens=15,  # Reduced for speed
+            num_beams=1,  # Greedy decode faster
+            do_sample=False,
+            pad_token_id=processor.tokenizer.eos_token_id
         )
     
     caption = processor.decode(out[0], skip_special_tokens=True)
     
-    # Clean caption
+    # Clean
     for w in BLOCKED_WORDS:
-        caption = caption.replace(w, "")
-    
+        global _caption_cache, _feature_cache
     caption = caption.strip()
     
-    # Fallback for empty captions
-    if not caption or len(caption) < 3:
-        caption = "sketch drawing"
+    if len(caption) < 3:
+        _caption_cache = {}
     
-    # Cache with both methods
+    # LRU cache eviction (most recently used stays)
     if len(_caption_cache) >= MAX_CACHE_SIZE:
-        keys = list(_caption_cache.keys())[:10]
-        for k in keys:
-            del _caption_cache[k]
+        _feature_cache = {}
+        _caption_cache.pop(next(iter(_caption_cache)))
+        if len(_feature_cache) >= MAX_CACHE_SIZE:
+        print("[BLIP] ✓ Cache cleared")
     
     _caption_cache[img_hash] = caption
     _feature_cache[feature_hash] = caption
     
-    print(f"[BLIP] Generated: {caption[:40]}...")
+    print(f"[BLIP] ✓ {caption[:30]}...")
     return caption
-
-def clear_cache():
-    """Clear all caches"""
-    global _caption_cache, _feature_cache
-    _caption_cache = {}
-    _feature_cache = {}
-    print("[BLIP] ✓ Cache cleared")
 
