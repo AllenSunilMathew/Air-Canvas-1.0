@@ -7,7 +7,8 @@ Status: In Progress
 - [x] 3. Update processCompletedStroke() to trigger closure logic ✅
 - [x] 4. Update redraw() to handle closed shapes (lineTo first point + optional fill/closePath) ✅
 - [x] 5. Add visual feedback (closing animation, status update) ✅
-- [ ] 6. Test: Draw open square/circle → gesture release → auto-close
+- [x] 6. Test: Draw open square/circle → gesture release → auto-close ✅
+- [x] Bonus: Multiple floating shapes - thinner lines (3px), semi-transparent (0.8), floating fill effect
 - [ ] 7. attempt_completion
 
 ## Testing Checklist:

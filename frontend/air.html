@@ -446,7 +446,7 @@ newPoints.push({
 x:start.x+(end.x-start.x)*t,
 y:start.y+(end.y-start.y)*t
 })
-
+  
 }
 
 }
@@ -502,7 +502,8 @@ if(currentStrokePoints.length>0){
 
 allStrokes.push({
 points:[...currentStrokePoints],
-color:currentStrokeColor
+color:currentStrokeColor,
+isFloating: true  // Mark as floating shape
 })
 
 }
@@ -515,54 +516,86 @@ return
 // First straighten the stroke
 let clean=inkModeler.straightenStroke(currentStrokePoints)
 
-// Apply shape detection + auto-closure
+// Apply shape detection + auto-closure (closes imperfect shapes!)
 clean = inkModeler.shapeDetector.process(clean)
 
 allStrokes.push({
 points:clean,
-color:currentStrokeColor
+color:currentStrokeColor,
+isFloating: true  // Auto-float EVERY straightened shape
 })
 
-updateStatus('🔒 Shape processed (' + clean.length + ' points)', '#4CAF50');
+updateStatus('🔒 Shape straightened & floated! (' + clean.length + ' points)', '#4CAF50');
 redraw()
 
 currentStrokePoints=[]
 }
 
 
+
+// Auto-floating renderer - called continuously after straightening
+let floatTime = 0;
 function redraw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.save();
   ctx.fillStyle = 'white';
   ctx.fillRect(0,0,canvas.width,canvas.height);
   
-  allStrokes.forEach(stroke=>{
-    if(stroke.points.length<2) return
-    ctx.beginPath()
-    ctx.moveTo(stroke.points[0].x,stroke.points[0].y)
-    for(let i=1;i<stroke.points.length;i++){
-      ctx.lineTo(stroke.points[i].x,stroke.points[i].y)
-    }
-    ctx.strokeStyle=stroke.color
-    ctx.lineWidth=5
-    ctx.lineCap="round"
-    ctx.lineJoin="round"
+  allStrokes.forEach((stroke, index) => {
+    if(stroke.points.length<2 || !stroke.isFloating) return;  // Only float straightened shapes
     
-    // Close path if first and last points match (auto-closed shape)
-    if (stroke.points.length > 3 && 
-        Math.abs(stroke.points[0].x - stroke.points[stroke.points.length-1].x) < 5 &&
-        Math.abs(stroke.points[0].y - stroke.points[stroke.points.length-1].y) < 5) {
-      ctx.closePath();
-      ctx.stroke();
-      // Optional subtle fill for closed shapes
-      ctx.globalAlpha = 0.1;
-      ctx.fillStyle = stroke.color;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.stroke();
+    ctx.save();
+    // **REAL FLOATING MOTION** - position offset
+    const bobY = Math.sin(floatTime * 0.005 + index * 0.8) * 12;
+    const swayX = Math.cos(floatTime * 0.003 + index * 0.5) * 6;
+    const pulse = 0.6 + 0.4 * Math.sin(floatTime * 0.01 + index);
+    
+    ctx.translate(swayX, bobY);  // **MOVES THE SHAPE**
+    
+    ctx.globalAlpha = pulse;
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    ctx.shadowColor = stroke.color;
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 2;
+    
+    ctx.beginPath();
+    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+    for(let i=1; i<stroke.points.length; i++){
+      ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
     }
-  })
+    ctx.closePath();
+    ctx.stroke();
+    
+    // Floating glow fill
+    ctx.globalAlpha = pulse * 0.15;
+    ctx.fillStyle = stroke.color;
+    ctx.fill();
+    
+    ctx.restore();
+  });
+  ctx.restore();
+  
+  floatTime += 1;
+  requestAnimationFrame(redraw);  // **AUTO-LOOP after first call**
 }
+
+
+// Auto-start floating loop on first straightened shape
+let floatingLoopActive = false;
+const originalPush = Array.prototype.push;
+Array.prototype.push = function(...items) {
+  const result = originalPush.apply(this, items);
+  if (this === allStrokes && items[0] && items[0].isFloating && !floatingLoopActive) {
+    floatingLoopActive = true;
+    updateStatus('✨ Auto-floating activated! Shapes now move after straightening', '#FF6B6B');
+    requestAnimationFrame(redraw);
+  }
+  return result;
+};
+
 
 
 // ==========================
@@ -737,18 +770,22 @@ ctx.lineTo(x,y)
 ctx.stroke();
 ctx.restore();
 
-// Commit stroke
+// Live preview ONLY - no persistent commit during drawing
 ctx.strokeStyle=sparkleEnabled ? updateSparkleColor() : drawColor
-ctx.lineWidth=5
+ctx.lineWidth=8;
 ctx.lineCap="round"
 ctx.lineJoin="round"
+ctx.globalAlpha = 0.3;
 ctx.beginPath()
 ctx.moveTo(prevX,prevY)
 ctx.lineTo(x,y)
 ctx.stroke()
+ctx.globalAlpha = 1;
 
+// **NO PERSISTENT DRAWING** - currentStrokePoints for straightening only
 currentStrokePoints.push({x,y})
 currentStrokeColor=drawColor
+
 
 }else{
 
@@ -1681,6 +1718,20 @@ document.addEventListener('mouseup', () => {
 const debugDiv = document.createElement('div');
 debugDiv.id = 'debugInfo';
 debugDiv.className = 'debug-info';
+debugDiv.textContent = 'Initializing... Single Cursor Air Canvas ✓ Drag video ✓ Smooth ✓';
+document.body.appendChild(debugDiv);
+
+// Toggle
+document.getElementById("straightenToggle").addEventListener("change",e=>{
+lineStraighteningEnabled=e.target.checked
+})
+
+
+
+</script>
+
+</body>
+</html>v.className = 'debug-info';
 debugDiv.textContent = 'Initializing... Single Cursor Air Canvas ✓ Drag video ✓ Smooth ✓';
 document.body.appendChild(debugDiv);
 
