@@ -81,7 +81,14 @@ if device == "cuda":
         pipe.enable_model_cpu_offload()
         print("[SD] ✓ Model CPU offload enabled")
 
-# 7. torch.compile with fallback
+# 7. torch.compile with fallback + FP8 check
+if hasattr(torch.nn.functional, 'scaled_dot_product_attention') and torch.__version__ >= '2.1':
+    
+        pipe.enable_flash_attention_2()
+        print("[SD] ✓ Flash Attention 2 (FP8 capable)")
+    except:
+        pass
+
 try:
     pipe.unet = torch.compile(pipe.unet, mode="reduce-overhead")
     pipe.vae = torch.compile(pipe.vae, mode="reduce-overhead")
@@ -156,11 +163,18 @@ def generate_image(prompt, negative_prompt, image_bytes, style):
     control_image = preprocessed.controlnet_sketch
     params = STYLE_PARAMS.get(style, STYLE_PARAMS["realistic"])
     
-    # Dynamic denoising based on image complexity (edge density)
+    # Dynamic denoising + steps based on image complexity (edge density)
     gray = np.array(control_image.convert('L'))
     edges = cv2.Canny(gray, 50, 150)
     edge_density = np.mean(edges > 0) / 255
+    
+    # Dynamic steps: simpler sketches fewer steps (faster)
+    dynamic_steps = max(15, min(25, int(20 + edge_density * 10)))
+    params["steps"] = dynamic_steps
+    
     denoising_strength = max(0.75, min(0.95, 0.85 + edge_density * 0.1))
+    print(f"[SD] Dynamic: {dynamic_steps} steps, density={edge_density:.2f}, strength={denoising_strength:.2f}")
+
     
     # Clear GPU cache before generation
     if device == "cuda":

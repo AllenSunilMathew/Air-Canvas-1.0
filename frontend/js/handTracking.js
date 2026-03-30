@@ -12,7 +12,8 @@ class HandTracking {
     this.isRunning = false;
     this.onResultsCallback = null;
     this.lastProcessingTime = 0;
-    this.frameSkip = 2;
+    this.frameSkip = 3;  // Throttled to ~15 FPS (60/3=20, conservative for perf)
+
     this.frameCount = 0;
     this.animationId = null;
   }
@@ -136,6 +137,13 @@ class HandTracking {
   async processFrame() {
     if (!this.isRunning) return;
 
+    const now = performance.now();
+    if (now - this.lastRAF < 1000/15) {  // Strict 15 FPS cap
+      this.animationId = requestAnimationFrame(() => this.processFrame());
+      return;
+    }
+    this.lastRAF = now;
+
     try {
       this.frameCount++;
       
@@ -151,10 +159,10 @@ class HandTracking {
       
     } catch (error) {
       console.error('Error processing frame:', error);
-      // Continue trying even if there's an error
       this.animationId = requestAnimationFrame(() => this.processFrame());
     }
   }
+
 
   /**
    * Stop hand tracking and camera

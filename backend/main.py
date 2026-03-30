@@ -21,6 +21,7 @@ from color_analyzer import extract_dominant_colors
 from prompt_enhancer import enhance_prompt
 from sd15_utils import generate_image, warmup_model, device as sd_device, cleanup as sd_cleanup
 from shape_processor import detect_and_straighten_shapes, strokes_to_3d
+from ocr import ocr_image
 
 app = FastAPI(title="Sketch-to-Image API (Optimized)")
 
@@ -32,28 +33,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==================== ADVANCED CACHING ====================
+import collections
+from datetime import datetime, timedelta
+
+# ==================== ENHANCED CACHING + THROTTLING ====================
 _response_cache = {}
 _feature_cache = {}
-MAX_CACHE_SIZE = 30
+MAX_CACHE_SIZE = 100
+CACHE_TTL = timedelta(minutes=5)
+
+# Semaphore for concurrent SD generations (max 3)
+semaphore = asyncio.Semaphore(3)
 
 def _get_image_hash(image_bytes: bytes) -> str:
-    return hashlib.md5(image_bytes).hexdigest()[:16]
+    
 
 def _get_cache_key(image_bytes: bytes, style: str) -> str:
-    return f"{_get_image_hash(image_bytes)}_{style}"
+    async def process_request_async(image_bytes: bytes, style: str) -> dict:
 
-# ==================== REQUEST QUEUE ====================
-# Simple request queue to prevent GPU overload
-_request_queue = PriorityQueue(maxsize=5)
-_processing_lock = threading.Lock()
-
-async def process_request_async(image_bytes: bytes, style: str) -> dict:
-    \"\"\"Optimized async pipeline with unified preprocess and torch contexts.\"\"\"
-    cache_key = _get_cache_key(image_bytes, style)
+class TTLCache:
+    def __init__(self, maxsize=100, ttl=timedelta(minutes=5)):
+        \"\"\"Optimized async pipeline with unified preprocess and torch contexts.\"\"\"
+        self.maxsize = maxsize
+        self.ttl = ttl
     
-    # Check cache first
-    if cache_key in _response_cache:
+    def get(self, key):
+        cache_key = _get_cache_key(image_bytes, style)
+            item = self.cache[key]
+            if datetime.now() - item['time'] < self.ttl:
+        
+                return item['value']
+            else:
+        # Check cache first
+        return None
+    
+    def set(self, key, value):
+        if cache_key in _response_cache:
+            self.cache.popitem(last=False)
+        self.cache[key] = {'value': value, 'time': datetime.now()}
+
+response_cache = TTLCache(MAX_CACHE_SIZE, CACHE_TTL)
+
         result = _response_cache[cache_key].copy()
         result[\"cached\"] = True
         return result
@@ -302,9 +322,7 @@ async def preview_inflate(image: UploadFile = File(...)):
         "straightened_sketch_b64": maps["straightened_sketch_b64"]
     }
 
-@app.get("/ping")
-def ping():
-    return "OK"
+@app.get("/ping")\n    def ping():\n        return "OK"\n\n\n@app.post("/ocr")\nasync def ocr_handwriting(image_b64: str = Form(...)):\n    \"\"\"OCR air handwriting to clean text\"\"\"\n    return ocr_image(image_b64)
 
 
     

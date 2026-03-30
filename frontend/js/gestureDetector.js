@@ -14,7 +14,8 @@ class GestureDetector {
     // Gesture thresholds
     this.PINCH_THRESHOLD = 0.05;
     this.MOVE_THRESHOLD = 0.02;
-    this.STABILIZE_FRAMES = 3;
+    this.STABILIZE_FRAMES = 5;  // Increased debounce to 100ms equivalent (at 15FPS)
+
     this.stabilizeCount = 0;
     
     // Current state
