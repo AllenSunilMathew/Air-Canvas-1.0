@@ -541,45 +541,52 @@ function redraw(){
   ctx.fillRect(0,0,canvas.width,canvas.height);
   
   allStrokes.forEach((stroke, index) => {
-    if(stroke.points.length<2 || !stroke.isFloating) return;  // Only float straightened shapes
+    if(stroke.points.length<2 || !stroke.isFloating) return;
     
     ctx.save();
-    // **REAL FLOATING MOTION** - position offset
-    const bobY = Math.sin(floatTime * 0.005 + index * 0.8) * 12;
-    const swayX = Math.cos(floatTime * 0.003 + index * 0.5) * 6;
-    const pulse = 0.6 + 0.4 * Math.sin(floatTime * 0.01 + index);
     
-    ctx.translate(swayX, bobY);  // **MOVES THE SHAPE**
+    // 3D Projection Parameters
+    const bobY = Math.sin(floatTime * 0.005 + index * 0.8) * 8;
+    const swayX = Math.cos(floatTime * 0.003 + index * 0.5) * 4;
+    const rotateZ = Math.sin(floatTime * 0.002 + index) * 0.3;
+    const extrudeHeight = 30 + Math.sin(floatTime * 0.008 + index) * 10;
     
-    ctx.globalAlpha = pulse;
-    ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    ctx.translate(canvas.width/2 + swayX, canvas.height/2 + bobY);
+    ctx.rotate(rotateZ);
     
-    ctx.shadowColor = stroke.color;
-    ctx.shadowBlur = 20;
-    ctx.shadowOffsetY = 2;
-    
-    ctx.beginPath();
-    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-    for(let i=1; i<stroke.points.length; i++){
-      ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+    // Extrude effect: draw multiple parallel lines for 3D depth
+    const lineCount = 8;
+    for(let layer = 0; layer < lineCount; layer++) {
+      const layerAlpha = 0.8 - (layer * 0.1);
+      const layerOffsetX = (layer - lineCount/2) * 3;
+      const layerOffsetY = (layer - lineCount/2) * 1;
+      
+      ctx.globalAlpha = layerAlpha * 0.6;
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = 3 + layer * 0.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      ctx.shadowColor = stroke.color;
+      ctx.shadowBlur = 15 + layer * 2;
+      ctx.shadowOffsetX = layerOffsetX * 0.5;
+      ctx.shadowOffsetY = layerOffsetY + 2;
+      
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x - canvas.width/2 + layerOffsetX, stroke.points[0].y - canvas.height/2 + layerOffsetY);
+      for(let i=1; i<stroke.points.length; i++){
+        ctx.lineTo(stroke.points[i].x - canvas.width/2 + layerOffsetX, stroke.points[i].y - canvas.height/2 + layerOffsetY);
+      }
+      ctx.closePath();
+      ctx.stroke();
     }
-    ctx.closePath();
-    ctx.stroke();
-    
-    // Floating glow fill
-    ctx.globalAlpha = pulse * 0.15;
-    ctx.fillStyle = stroke.color;
-    ctx.fill();
     
     ctx.restore();
   });
   ctx.restore();
   
   floatTime += 1;
-  requestAnimationFrame(redraw);  // **AUTO-LOOP after first call**
+  requestAnimationFrame(redraw);
 }
 
 
