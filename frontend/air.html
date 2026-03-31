@@ -475,9 +475,9 @@ const preloader=document.getElementById("preloader")
 
 let prevX=null
 let prevY=null
-let drawColor="#f84f85"
+let drawColor="#000000"
 let sparkleTime = 1;
-let sparkleEnabled = true;
+let sparkleEnabled = false;
 let lineStraighteningEnabled=true
 
 function setColor(c){
@@ -521,7 +521,7 @@ clean = inkModeler.shapeDetector.process(clean)
 
 allStrokes.push({
 points:clean,
-color:currentStrokeColor,
+color:'#ff0000',  // Red for auto-straightened 3D shapes
 isFloating: true  // Auto-float EVERY straightened shape
 })
 
@@ -698,7 +698,7 @@ document.body.appendChild(statusDiv);
 
 function updateStatus(text, color) {
   statusDiv.textContent = text;
-  statusDiv.style.background = color || 'rgba(0,0,0,0.7)';
+  statusDiv.style.background = color || 'rgb(0,0,0,0)';
 }
 
 hands.onResults(function(results){
@@ -767,7 +767,7 @@ function updateSparkleColor() {
   return `hsl(${Math.round(hue)}, ${Math.round(s)}%, ${Math.round(l)}%)`;
 }
 
-ctx.strokeStyle=sparkleEnabled ? updateSparkleColor() : drawColor
+ctx.strokeStyle=drawColor
 ctx.lineWidth=8;
 ctx.lineCap="round";
 ctx.lineJoin="round";
@@ -778,7 +778,7 @@ ctx.stroke();
 ctx.restore();
 
 // Live preview ONLY - no persistent commit during drawing
-ctx.strokeStyle=sparkleEnabled ? updateSparkleColor() : drawColor
+ctx.strokeStyle=drawColor
 ctx.lineWidth=8;
 ctx.lineCap="round"
 ctx.lineJoin="round"

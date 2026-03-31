@@ -10,14 +10,14 @@ class DrawingCanvas {
     this.height = height;
     this.app = null;
     this.graphics = null;
-    this.currentColor = '#4fc3f7'; // Base for sparkling blue effect
-    this.brushSize = 5;
+    this.currentColor = '#000000'; // Solid black for sketch lines
+    this.brushSize = 6; // Slightly thicker to reduce pixelation appearance
     this.isEraser = false;
     this.previousPoint = null;
     this.isDrawing = false;
     
     // Sparkling properties
-    this.sparkleEnabled = true;
+    this.sparkleEnabled = false; // Disabled for solid non-pixelated black lines
     this.sparkleTime = 0;
     this.sparkleIntensity = 0.8;
     
@@ -163,7 +163,7 @@ class DrawingCanvas {
     
     targetGraphics.lineStyle({
       width: this.brushSize,
-      color: this.isEraser ? 0xFFFFFF : this.getSparkleColor(),
+      color: this.isEraser ? 0xFFFFFF : this.parseColor(this.currentColor),
       alpha: 1,
       cap: PIXI.LINE_CAP.ROUND,
       join: PIXI.LINE_JOIN.ROUND,
