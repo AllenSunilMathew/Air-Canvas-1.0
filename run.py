@@ -10,9 +10,9 @@ BACKEND_DIR = os.path.join(PROJECT_DIR, "backend")
 # venv is outside backend
 VENV_PYTHON = os.path.join(PROJECT_DIR, "venv", "Scripts", "python.exe")
 
-# HTML_AIR = os.path.join(PROJECT_DIR, "frontend", "air.html")
-HTML_DRAW = os.path.join(PROJECT_DIR, "frontend", "draw.html")
-HTML_RES = os.path.join(PROJECT_DIR, "frontend", "result.html")
+HTML_AIR = os.path.join(PROJECT_DIR, "frontend", "air.html")
+HTML_DRAW = os.path.join(PROJECT_DIR, "frontend", "air.html")
+# HTML_RES = os.path.join(PROJECT_DIR, "frontend", "result.html")
 
 # === Start FastAPI backend ===
 subprocess.Popen(

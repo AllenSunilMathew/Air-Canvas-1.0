@@ -10,14 +10,14 @@ class DrawingCanvas {
     this.height = height;
     this.app = null;
     this.graphics = null;
-    this.currentColor = '#000000'; // Solid black for sketch lines
+this.currentColor = '#000000'; // Base for solid black sketch lines (not pixelated)
     this.brushSize = 6; // Slightly thicker to reduce pixelation appearance
     this.isEraser = false;
     this.previousPoint = null;
     this.isDrawing = false;
     
     // Sparkling properties
-    this.sparkleEnabled = false; // Disabled for solid non-pixelated black lines
+    this.sparkleEnabled = false; // Disabled for solid black lines - no pixelation
     this.sparkleTime = 0;
     this.sparkleIntensity = 0.8;
     
